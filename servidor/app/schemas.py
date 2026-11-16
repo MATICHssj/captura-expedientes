@@ -51,15 +51,28 @@ class Cotizacion(BaseModel):
     modelo: Optional[str] = Field(None, description="Modelo y versión")
     anio: Optional[int] = None
     precio: Optional[float] = Field(None, description="Precio del auto en pesos")
+    cliente_nombre: Optional[str] = Field(None, description="Nombre del cliente si aparece en la cotización")
+
+
+class ComprobanteDomicilio(BaseModel):
+    emisor: Optional[str] = Field(None, description="CFE, agua, Telmex, Izzi, predial, etc.")
+    titular: Optional[str] = None
+    calle_numero: Optional[str] = None
+    colonia: Optional[str] = None
+    cp: Optional[str] = None
+    municipio_estado: Optional[str] = None
+    fecha_emision: Optional[str] = Field(None, description="YYYY-MM-DD")
 
 
 class DocExtraction(BaseModel):
-    tipo: Literal["ine", "estado_cuenta", "solicitud", "cotizacion", "otro"]
+    tipo: Literal["ine", "estado_cuenta", "solicitud", "cotizacion", "comprobante_domicilio", "otro"]
+    descripcion: Optional[str] = Field(None, description="Frase corta de qué documento es")
     legible: bool = Field(True, description="False si es imposible leer lo importante")
     ine: Optional[INE] = None
     estado_cuenta: Optional[EstadoCuenta] = None
     solicitud: Optional[Solicitud] = None
     cotizacion: Optional[Cotizacion] = None
+    comprobante_domicilio: Optional[ComprobanteDomicilio] = None
     dudas: list[str] = Field(
         default_factory=list,
         description="Campos que leíste con poca certeza (letra difícil, borroso) y por qué")

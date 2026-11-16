@@ -102,6 +102,8 @@ label.drop input { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .notes { margin: 6px 0 0; padding: 0; list-style: none; font-size: .84rem; color: var(--muted); display: flex; flex-direction: column; gap: 2px; }
 .notes li.duda { color: var(--warn); }
 .notes li.err { color: var(--bad); }
+.detalle summary { cursor: pointer; font-size: .8rem; color: var(--muted); margin-top: 6px; }
+.detalle pre { font-family: var(--f-data); font-size: .74rem; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px; margin: 6px 0 0; max-height: 260px; overflow: auto; }
 .x { border: 0; background: none; color: var(--muted); font-size: 1.2rem; line-height: 1; padding: 2px 6px; border-radius: 6px; }
 .x:hover { color: var(--bad); background: var(--bad-soft); }
 
@@ -181,7 +183,7 @@ footer a { color: inherit; }
     <div>
       <div class="eyebrow" id="empresa">Crédito automotriz · captura</div>
       <h1>Captura de Expedientes</h1>
-      <p>Arrastra la INE, la solicitud, la cotización y los estados de cuenta. Se enderezan las fotos, se leen y se arma la ficha con el promedio de abonos.</p>
+      <p>Arrastra la INE, la solicitud, la cotización, el comprobante de domicilio y los estados de cuenta. Se enderezan las fotos, se leen y se arma la ficha con el promedio de abonos.</p>
     </div>
     <div class="cuenta">
       <div class="medidor" id="medidor" title="Documentos leídos este mes"><span class="barra"><i id="medidor-i" style="width:0"></i></span><span id="medidor-t">—</span></div>
@@ -201,7 +203,7 @@ footer a { color: inherit; }
       <label class="drop" id="drop">
         <input id="file" type="file" multiple accept="image/jpeg,image/png,image/webp,application/pdf">
         <strong id="drop-t">Arrastra aquí todos los documentos del cliente</strong>
-        <span>INE, solicitud, cotización y estados de cuenta, juntos o por partes · o toca para elegir varios · JPG, PNG o PDF</span>
+        <span>INE, solicitud, cotización, comprobante de domicilio y estados de cuenta, juntos o por partes · o toca para elegir varios · JPG, PNG o PDF</span>
       </label>
       <ul class="checklist" id="checklist" aria-label="Documentos requeridos"></ul>
       <button class="btn primary" id="procesar" type="button" disabled>Leer documentos</button>
@@ -237,7 +239,7 @@ const S = { files: [], overrides: {}, ejemplo: false, uso: null };
 let nextId = 1;
 const $ = (id) => document.getElementById(id);
 const MXN = new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" });
-const ETIQ = { ine: "INE", estado_cuenta: "Estado de cuenta", solicitud: "Solicitud", cotizacion: "Cotización", otro: "No reconocido" };
+const ETIQ = { ine: "INE", estado_cuenta: "Estado de cuenta", solicitud: "Solicitud", cotizacion: "Cotización", comprobante_domicilio: "Comprobante de domicilio", otro: "No reconocido" };
 
 /* ---------------- servidor ---------------- */
 async function api(ruta, opts = {}) {
@@ -271,7 +273,8 @@ const SECCIONES = {
   ine: ["nombre_completo", "fecha_nacimiento", "curp", "calle_numero", "colonia", "cp", "municipio_estado", "vigencia"],
   estado_cuenta: ["banco", "titular", "periodo_inicio", "periodo_fin", "total_depositos_abonos", "suma_abonos_movimientos", "cuenta_terminacion", "saldo_inicial", "total_retiros_cargos", "saldo_final", "evidencia_total"],
   solicitud: ["nombre_completo", "correo", "telefono_celular", "calle_numero", "colonia", "cp", "municipio_estado"],
-  cotizacion: ["marca", "modelo", "anio", "precio"],
+  cotizacion: ["marca", "modelo", "anio", "precio", "cliente_nombre"],
+  comprobante_domicilio: ["emisor", "titular", "calle_numero", "colonia", "cp", "municipio_estado", "fecha_emision"],
 };
 const NUMERICOS = new Set(["total_depositos_abonos", "suma_abonos_movimientos", "precio", "anio", "vigencia", "saldo_inicial", "total_retiros_cargos", "saldo_final"]);
 function num(v) { if (v === null || v === undefined || v === "") return null; if (typeof v === "number") return isFinite(v) ? v : null; const n = parseFloat(String(v).replace(/[$,\s]/g, "")); return isFinite(n) ? n : null; }
@@ -279,7 +282,7 @@ function txt(v) { if (v === null || v === undefined) return null; const s = Stri
 function normalizar(lista) {
   return (lista || []).map((d) => {
     const tipo = SECCIONES[d?.tipo] ? d.tipo : "otro";
-    const out = { tipo, legible: d?.legible !== false, dudas: Array.isArray(d?.dudas) ? d.dudas.map(String) : [] };
+    const out = { tipo, descripcion: txt(d?.descripcion), legible: d?.legible !== false, dudas: Array.isArray(d?.dudas) ? d.dudas.map(String) : [] };
     if (tipo !== "otro") { const sec = d[tipo] || {}; out[tipo] = {}; for (const k of SECCIONES[tipo]) out[tipo][k] = NUMERICOS.has(k) ? num(sec[k]) : txt(sec[k]); }
     return out;
   });
@@ -305,14 +308,14 @@ function curpVsNombre(curp, nombre) {
 }
 function fusionar(docs, tipo) {
   const out = {}; let hay = false;
-  for (const d of docs) if (d.tipo === tipo && d[tipo] && d.legible) { hay = true; for (const [k, v] of Object.entries(d[tipo])) if (out[k] == null && v != null) out[k] = v; }
+  for (const d of docs) if (d.tipo === tipo && d[tipo]) { hay = true; for (const [k, v] of Object.entries(d[tipo])) if (out[k] == null && v != null) out[k] = v; }
   return hay ? out : null;
 }
 function armarFicha() {
   const docs = S.files.flatMap((f) => f.docs || []);
-  const ine = fusionar(docs, "ine"), sol = fusionar(docs, "solicitud"), cot = fusionar(docs, "cotizacion");
+  const ine = fusionar(docs, "ine"), sol = fusionar(docs, "solicitud"), cot = fusionar(docs, "cotizacion"), com = fusionar(docs, "comprobante_domicilio");
   const avisos = [], vistos = new Set(), estados = [];
-  for (const d of docs) if (d.tipo === "estado_cuenta" && d.estado_cuenta && d.legible) {
+  for (const d of docs) if (d.tipo === "estado_cuenta" && d.estado_cuenta) {
     const e = d.estado_cuenta, k = `${(e.banco || "").toLowerCase()}|${e.periodo_fin || ""}`;
     if (e.periodo_fin && vistos.has(k)) continue; vistos.add(k); estados.push(e);
   }
@@ -329,15 +332,19 @@ function armarFicha() {
   let dirSrc = null, D = null;
   if (ine?.calle_numero) { D = ine; dirSrc = "INE"; }
   else if (sol?.calle_numero) { D = sol; dirSrc = ine ? "Solicitud (la INE no trae calle)" : "Solicitud"; }
+  else if (com?.calle_numero) { D = com; dirSrc = ine ? "Comprobante de domicilio (la INE no trae calle)" : "Comprobante de domicilio"; }
   else if (ine) { D = ine; dirSrc = "INE (sin calle)"; }
   const direccion = D ? [D.calle_numero, D.colonia, D.cp ? `CP ${D.cp}` : null, D.municipio_estado].filter(Boolean).join(", ") : null;
-  const nombre = ine?.nombre_completo || sol?.nombre_completo || null;
+  const titularEdo = estados.find((e) => e.titular)?.titular || null;
+  const [nombre, nombreSrc] = [[ine?.nombre_completo, "INE"], [sol?.nombre_completo, "Solicitud"], [titularEdo, "Estado de cuenta"],
+    [com?.titular, "Comprobante de domicilio"], [cot?.cliente_nombre, "Cotización"]].find(([v]) => v) || [null, null];
+  if (nombre && nombreSrc !== "INE") avisos.push(`El nombre se tomó de: ${nombreSrc} (no se leyó en una INE). Confírmalo con la identificación.`);
   if (ine?.nombre_completo && sol?.nombre_completo && !mismoNombre(ine.nombre_completo, sol.nombre_completo))
     avisos.push(`El nombre de la solicitud (${sol.nombre_completo}) no coincide con el de la INE.`);
   for (const e of usados) if (nombre && e.titular && !mismoNombre(nombre, e.titular))
     avisos.push(`El titular del estado de cuenta ${e.banco || ""} ${e.periodo_fin || ""} (${e.titular}) no coincide con el cliente.`);
   for (const f of S.files) for (const d of f.docs || []) {
-    if (!d.legible) avisos.push(`${f.name}: ${ETIQ[d.tipo]} ilegible; pide otra foto.`);
+    if (!d.legible) avisos.push(`${f.name}: ${ETIQ[d.tipo]} difícil de leer; se usó lo que sí se leyó. Revísalo o pide otra foto.`);
     for (const x of d.dudas) avisos.push(`${ETIQ[d.tipo]} · ${x}`);
   }
   // ---- estados de cuenta en $0 ----
@@ -397,9 +404,23 @@ function armarFicha() {
     if (ine.cp.trim() !== sol.cp.trim()) avisos.push(`El CP de la solicitud (${sol.cp}) es distinto al de la INE (${ine.cp}); el cliente pudo cambiar de domicilio.`);
     else verificados.push("El código postal de la solicitud coincide con la INE.");
   }
+  if (com) {
+    if (com.fecha_emision) {
+      const dias = (Date.now() - Date.parse(com.fecha_emision + "T00:00:00")) / 86400000;
+      if (dias > 90) avisos.push(`El comprobante de domicilio es del ${com.fecha_emision}: tiene más de 3 meses.`);
+      else if (dias >= 0) verificados.push("El comprobante de domicilio tiene menos de 3 meses.");
+    } else avisos.push("No se encontró la fecha del comprobante de domicilio; revisa que sea reciente.");
+    const cpRef = D && D !== com ? D.cp : (ine?.cp || sol?.cp);
+    if (com.cp && cpRef) {
+      if (com.cp.trim() !== cpRef.trim()) avisos.push(`El CP del comprobante de domicilio (${com.cp}) no coincide con el de la dirección del cliente (${cpRef}).`);
+      else verificados.push("El comprobante de domicilio coincide con el código postal del cliente.");
+    }
+    if (com.titular && nombre && nombreSrc !== "Comprobante de domicilio" && !mismoNombre(nombre, com.titular))
+      avisos.push(`El comprobante de domicilio está a nombre de ${com.titular}, no del cliente (puede ser de un familiar; confírmalo).`);
+  }
   return {
     campos: {
-      nombre: { v: nombre, src: ine?.nombre_completo ? "INE" : sol?.nombre_completo ? "Solicitud" : null },
+      nombre: { v: nombre, src: nombreSrc },
       fecha_nacimiento: { v: ine?.fecha_nacimiento || null, src: ine?.fecha_nacimiento ? "INE" : null },
       direccion: { v: direccion, src: dirSrc },
       correo: { v: sol?.correo || null, src: sol?.correo ? "Solicitud" : null },
@@ -410,7 +431,7 @@ function armarFicha() {
       auto_precio: { v: cot?.precio != null ? MXN.format(cot.precio) : null, src: cot?.precio != null ? "Cotización" : null },
     },
     estados, usados, promedio, avisos: [...new Set(avisos)], verificados,
-    tiene: { ine: !!ine, solicitud: !!sol, cotizacion: !!cot, estados: conTotal.length },
+    tiene: { ine: !!ine, solicitud: !!sol, cotizacion: !!cot, comprobante: !!com, estados: conTotal.length },
   };
 }
 const ETQ_CAMPOS = { nombre: "Nombre completo", fecha_nacimiento: "Fecha de nacimiento", direccion: "Dirección", correo: "Correo", celular: "Celular",
@@ -420,7 +441,7 @@ const valor = (ficha, k) => S.overrides[k] ?? ficha.campos[k].v ?? "";
 /* ---------------- interfaz ---------------- */
 function render() {
   const ficha = armarFicha();
-  const req = [["INE", ficha.tiene.ine], ["Solicitud", ficha.tiene.solicitud], ["Cotización", ficha.tiene.cotizacion],
+  const req = [["INE", ficha.tiene.ine], ["Solicitud", ficha.tiene.solicitud], ["Cotización", ficha.tiene.cotizacion], ["Comprobante de domicilio", ficha.tiene.comprobante],
     [`Estados de cuenta ${Math.min(3, ficha.tiene.estados)}/3`, ficha.tiene.estados >= 3]];
   $("checklist").replaceChildren(...req.map(([t, ok]) => el("li", { className: ok ? "ok" : "" }, t)));
   const pend = S.files.filter((f) => f.status === "pendiente").length, corriendo = S.files.some((f) => f.status === "procesando");
@@ -457,15 +478,17 @@ function filaArchivo(f) {
   const estado = f.status === "pendiente" ? el("span", { className: "stamp wait" }, "Pendiente")
     : f.status === "procesando" ? el("span", { className: "stamp run" }, f.paso || "Procesando…")
     : f.status === "error" ? el("span", { className: "stamp err" }, "No se leyó") : null;
-  const tipos = (f.docs || []).map((d) => el("span", { className: "stamp doc" }, d.legible ? ETIQ[d.tipo] : ETIQ[d.tipo] + " · ilegible"));
+  const tipos = (f.docs || []).map((d) => el("span", { className: "stamp doc" }, d.legible ? ETIQ[d.tipo] : ETIQ[d.tipo] + " · revisar"));
   const notas = el("ul", { className: "notes" },
     ...(f.ajustes || []).map((a) => el("li", {}, (f.kind === "pdf" ? "PDF: " : "Foto: ") + a)),
+    ...(f.docs || []).filter((d) => d.tipo === "otro").map((d) => el("li", { className: "duda" }, "No es uno de los documentos que se capturan" + (d.descripcion ? `; parece: ${d.descripcion}` : "") + ".")),
     ...(f.docs || []).flatMap((d) => d.dudas.map((x) => el("li", { className: "duda" }, x))),
     ...(f.error ? [el("li", { className: "err" }, f.error)] : []));
   const acciones = el("div", { className: "actions" });
   if (f.status === "error" && f.file) acciones.append(el("button", { className: "btn small", type: "button", onclick: () => { f.status = "pendiente"; f.error = null; correr(); } }, "Reintentar"));
   return el("li", { className: "file" }, thumb,
-    el("div", { style: "min-width:0" }, el("div", { className: "fname" }, f.name), el("div", { className: "fmeta" }, ...(estado ? [estado] : []), ...tipos), notas, acciones),
+    el("div", { style: "min-width:0" }, el("div", { className: "fname" }, f.name), el("div", { className: "fmeta" }, ...(estado ? [estado] : []), ...tipos), notas, ...((f.docs || []).length ? [el("details", { className: "detalle" }, el("summary", {}, "Ver datos leídos"),
+      el("pre", {}, JSON.stringify(f.docs.map((d) => ({ tipo: ETIQ[d.tipo], ...(d.descripcion ? { "qué es": d.descripcion } : {}), ...(d[d.tipo] || {}) })), null, 1)))] : []), acciones),
     el("button", { className: "x", type: "button", title: "Quitar archivo", "aria-label": `Quitar ${f.name}`, disabled: f.status === "procesando",
       onclick: () => { S.files = S.files.filter((x) => x !== f); if (f.preview) URL.revokeObjectURL(f.preview); render(); } }, "×"));
 }
@@ -534,6 +557,8 @@ function cargarEjemplo() {
     { id: nextId++, name: "solicitud.jpg", kind: "img", status: "listo", ajustes: ["recorté el documento y corregí la perspectiva"],
       docs: [E("solicitud", { nombre_completo: "María Guadalupe Hernández Ruiz", correo: "lupita.hdz88@gmail.com", telefono_celular: "5523418876", calle_numero: "Calle Ermita 214 int. 3", colonia: "Santa Martha", cp: "09510", municipio_estado: "Iztapalapa, CDMX" },
         ["dominio 'gmial.com' parece error de dedo; lo cambié a gmail.com", "celular: 5523418876 o 5523418816"])] },
+    { id: nextId++, name: "recibo_cfe.jpg", kind: "img", status: "listo", ajustes: ["la enderecé 1.8°"],
+      docs: [{ ...E("comprobante_domicilio", { emisor: "CFE", titular: "MARIA GUADALUPE HERNANDEZ RUIZ", calle_numero: "ERMITA 214 INT 3", colonia: "SANTA MARTHA", cp: "09510", municipio_estado: "IZTAPALAPA, CDMX", fecha_emision: "2026-10-20" }), descripcion: "Recibo CFE bimestral" }] },
     { id: nextId++, name: "cotizacion_versa.pdf", kind: "pdf", status: "listo", ajustes: [],
       docs: [E("cotizacion", { marca: "Nissan", modelo: "Versa Advance CVT", anio: 2026, precio: 359900 })] },
     { id: nextId++, name: "estados_bbva.pdf", kind: "pdf", status: "listo", ajustes: [],

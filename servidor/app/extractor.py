@@ -2,6 +2,7 @@ import base64, json, os
 import anthropic
 from .orientacion import detectar_rotacion
 from .preprocess import calidad_baja, preparar_imagen
+from .guia import COMO_RECONOCER
 from .schemas import DocExtraction, Lectura
 from .validators import monto_en_texto, validar
 
@@ -9,13 +10,13 @@ client = anthropic.Anthropic()
 MODEL = os.getenv("MODEL", "claude-opus-5-5")
 EFFORT = os.getenv("EFFORT", "high")   # más esfuerzo = mejor lectura de letra difícil
 
-SYSTEM = """Eres un capturista experto en documentos mexicanos para un analista de crédito automotriz.
+SYSTEM = f"""Eres un capturista experto en documentos mexicanos para un analista de crédito automotriz.
 Recibes UN archivo (foto o PDF). Puede traer varios documentos (ej. un PDF con 3 estados de cuenta, o INE y
 solicitud en la misma foto): devuelve uno por cada documento en `documentos`. Si es foto, recibes DOS versiones: la original a color y una realzada
 (grises, más contraste). Usa ambas: la de color para distinguir tinta de fondo, la realzada para trazos tenues.
 
-Clasifica cada documento: ine (credencial para votar), estado_cuenta (banco mexicano), solicitud (solicitud de crédito,
-puede estar llenada a mano), cotizacion (cotización de auto) u otro.
+Clasifica cada documento: ine, estado_cuenta, solicitud, cotizacion, comprobante_domicilio u otro.
+{COMO_RECONOCER}
 
 Cómo leer letra difícil:
 - Lee carácter por carácter. Usa el contexto: nombres y apellidos mexicanos comunes, colonias y municipios reales,
@@ -51,7 +52,8 @@ Lectura anterior:
 CRITICOS = {"ine": ["nombre_completo", "fecha_nacimiento", "curp", "calle_numero", "colonia", "cp"],
             "solicitud": ["nombre_completo", "correo", "telefono_celular", "calle_numero", "colonia", "cp"],
             "cotizacion": ["modelo", "anio", "precio"],
-            "estado_cuenta": ["total_depositos_abonos", "periodo_fin", "banco"]}
+            "estado_cuenta": ["total_depositos_abonos", "periodo_fin", "banco"],
+            "comprobante_domicilio": ["titular", "calle_numero", "cp", "fecha_emision"]}
 
 
 class ArchivoMalo(Exception):

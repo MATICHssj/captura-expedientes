@@ -1,11 +1,12 @@
 # Captura de Expedientes
 
-Herramienta para analistas de crédito automotriz en México. Subes la **INE, la solicitud, la cotización y los
-estados de cuenta** (fotos o PDF) y te arma la ficha del cliente:
+Herramienta para analistas de crédito automotriz en México. Subes la **INE, la solicitud, la cotización, el
+comprobante de domicilio y los estados de cuenta** (fotos o PDF) y te arma la ficha del cliente:
 
 - Nombre completo, fecha de nacimiento, dirección (si la INE no trae calle, la toma de la solicitud), correo y celular
 - **Promedio de depósitos/abonos de los últimos 3 estados de cuenta**
 - Modelo, año y precio del auto de la cotización
+- Comprobante de domicilio: que tenga menos de 3 meses, que el CP coincida y a nombre de quién está
 
 Lee letra difícil, endereza fotos de lado o chuecas, y **verifica** los datos: que los saldos cuadren, que los meses
 sean seguidos, que la CURP corresponda al nombre y la fecha, que la INE esté vigente, avisa de estados de cuenta en $0, etc.
