@@ -1,0 +1,572 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Captura de Expedientes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+html{color-scheme:light}body{margin:0}img{max-width:100%}[hidden]{display:none!important}
+/* Layout: mesa de trabajo de crédito — izquierda lo que entra (documentos), derecha lo que sale (ficha capturada). */
+:root {
+  --bg: #f3f5f7;
+  --surface: #ffffff;
+  --ink: #14202b;
+  --muted: #5a6775;
+  --line: #dce2e8;
+  --accent: #116d4e;
+  --accent-ink: #ffffff;
+  --accent-soft: #e2f1ea;
+  --warn: #9a5800;
+  --warn-soft: #fbefd9;
+  --bad: #b3261e;
+  --bad-soft: #fce8e6;
+  --focus: #2f6fdb;
+  --f-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-display: "IBM Plex Sans Condensed", "IBM Plex Sans", system-ui, sans-serif;
+  --f-data: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --r: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1318; --surface: #151c23; --ink: #e4ebf1; --muted: #92a0ae; --line: #26313b;
+    --accent: #4cc197; --accent-ink: #062016; --accent-soft: #10291f;
+    --warn: #efb24f; --warn-soft: #2b200f; --bad: #ff8b7c; --bad-soft: #321713; --focus: #7aa7ff;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1318; --surface: #151c23; --ink: #e4ebf1; --muted: #92a0ae; --line: #26313b;
+  --accent: #4cc197; --accent-ink: #062016; --accent-soft: #10291f;
+  --warn: #efb24f; --warn-soft: #2b200f; --bad: #ff8b7c; --bad-soft: #321713; --focus: #7aa7ff;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 15px; line-height: 1.5;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 40px;
+}
+.wrap { max-width: 1180px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+h1, h2, h3 { font-family: var(--f-display); font-weight: 600; margin: 0; text-wrap: balance; letter-spacing: .01em; }
+h1 { font-size: 1.75rem; line-height: 1.15; }
+h2 { font-size: 1.15rem; }
+.eyebrow { font-family: var(--f-data); font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+button { font: inherit; cursor: pointer; }
+button:focus-visible, input:focus-visible, label.drop:focus-within { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+header.top { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: end; justify-content: space-between; }
+header.top p { margin: 4px 0 0; color: var(--muted); max-width: 62ch; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.btn { border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 8px; padding: 8px 14px; font-weight: 500; }
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.btn.primary:disabled { opacity: .45; cursor: not-allowed; }
+.btn.small { padding: 4px 10px; font-size: .85rem; }
+
+.banner { border-radius: var(--r); padding: 12px 16px; background: var(--bad-soft); color: var(--ink); border: 1px solid var(--bad); }
+.banner.warn { background: var(--warn-soft); border-color: var(--warn); }
+
+.grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 20px; align-items: start; }
+@media (max-width: 880px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 18px; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+
+label.drop {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; text-align: center;
+  border: 1.5px dashed var(--line); border-radius: var(--r); padding: 26px 16px; cursor: pointer; background: var(--bg);
+  transition: border-color .15s, background .15s;
+}
+label.drop:hover, label.drop.over { border-color: var(--accent); background: var(--accent-soft); }
+label.drop strong { font-family: var(--f-display); font-size: 1.05rem; font-weight: 600; }
+label.drop span { color: var(--muted); font-size: .9rem; }
+label.drop input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+
+.checklist { display: flex; flex-wrap: wrap; gap: 6px; padding: 0; margin: 0; list-style: none; }
+.checklist li { font-family: var(--f-data); font-size: .78rem; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.checklist li.ok { background: var(--accent-soft); border-color: var(--accent); color: var(--ink); }
+.checklist li.ok::before { content: "✓ "; color: var(--accent); font-weight: 600; }
+
+.files { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.file { display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; gap: 12px; align-items: start; padding: 10px; border: 1px solid var(--line); border-radius: 8px; }
+.thumb { width: 56px; height: 56px; border-radius: 6px; background: var(--bg); border: 1px solid var(--line); object-fit: cover; display: flex; align-items: center; justify-content: center; font-family: var(--f-data); font-size: .7rem; color: var(--muted); overflow: hidden; }
+.thumb img { width: 100%; height: 100%; object-fit: cover; }
+.fname { font-weight: 500; overflow-wrap: anywhere; }
+.fmeta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 4px; }
+.stamp { font-family: var(--f-data); font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; padding: 1px 7px; border: 1.5px solid currentColor; border-radius: 4px; }
+.stamp.doc { color: var(--accent); transform: rotate(-1.5deg); }
+.stamp.wait { color: var(--muted); }
+.stamp.run { color: var(--focus); }
+.stamp.err { color: var(--bad); }
+.notes { margin: 6px 0 0; padding: 0; list-style: none; font-size: .84rem; color: var(--muted); display: flex; flex-direction: column; gap: 2px; }
+.notes li.duda { color: var(--warn); }
+.notes li.err { color: var(--bad); }
+.x { border: 0; background: none; color: var(--muted); font-size: 1.2rem; line-height: 1; padding: 2px 6px; border-radius: 6px; }
+.x:hover { color: var(--bad); background: var(--bad-soft); }
+
+.sumhead { display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; align-items: center; }
+.sumhead .left { display: flex; gap: 10px; align-items: center; }
+.badge { font-family: var(--f-data); font-size: .7rem; text-transform: uppercase; letter-spacing: .08em; padding: 2px 8px; border-radius: 4px; background: var(--warn-soft); color: var(--warn); border: 1px solid var(--warn); }
+
+.fields { display: flex; flex-direction: column; }
+.field { display: grid; grid-template-columns: 150px minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--line); }
+.field:last-child { border-bottom: 0; }
+.field label { font-size: .85rem; color: var(--muted); }
+.field input, .field textarea { width: 100%; resize: vertical; line-height: 1.4; min-width: 0; font-family: var(--f-data); font-size: .92rem; color: var(--ink); background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 5px 8px; font-variant-numeric: tabular-nums; }
+.field input:hover, .field textarea:hover { border-color: var(--line); }
+.field input:focus, .field textarea:focus { border-color: var(--focus); outline: none; background: var(--bg); }
+.field input::placeholder, .field textarea::placeholder { color: var(--muted); opacity: .7; }
+.field .src { grid-column: 2 / 3; font-size: .76rem; color: var(--muted); padding-left: 9px; }
+.field .src.edit { color: var(--focus); }
+.field.big input { font-size: 1.15rem; font-weight: 500; }
+.copy { border: 1px solid var(--line); background: var(--surface); color: var(--muted); border-radius: 6px; font-size: .78rem; padding: 3px 8px; }
+.copy:hover { color: var(--ink); border-color: var(--muted); }
+@media (max-width: 520px) {
+  .field { grid-template-columns: minmax(0, 1fr) auto; }
+  .field label { grid-column: 1 / -1; }
+  .field .src { grid-column: 1 / -1; }
+}
+
+.tablewrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { font-weight: 500; color: var(--muted); font-size: .78rem; }
+td.num, th.num { text-align: right; font-family: var(--f-data); font-variant-numeric: tabular-nums; }
+td.cero { color: var(--bad); font-weight: 600; }
+tr.unused td { color: var(--muted); text-decoration: line-through; }
+tfoot td { font-weight: 600; border-bottom: 0; }
+
+.avisos { list-style: none; margin: 0; padding: 12px 14px; border-radius: 8px; background: var(--warn-soft); border: 1px solid var(--warn); display: flex; flex-direction: column; gap: 4px; font-size: .9rem; }
+.verificados { list-style: none; margin: 0; padding: 12px 14px; border-radius: 8px; background: var(--accent-soft); border: 1px solid var(--accent); display: flex; flex-direction: column; gap: 4px; font-size: .9rem; }
+.verificados li::before { content: "✓ "; color: var(--accent); font-weight: 600; }
+.avisos li::before { content: "▲ "; color: var(--warn); font-size: .75em; }
+.empty { color: var(--muted); font-size: .92rem; margin: 0; }
+.toast { position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 8px 14px; border-radius: 8px; font-size: .9rem; z-index: 20; }
+footer { color: var(--muted); font-size: .82rem; max-width: 80ch; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+/* --- solo app vendible --- */
+.login { max-width: 400px; margin: 8vh auto 0; display: flex; flex-direction: column; gap: 18px; }
+.login form { display: flex; flex-direction: column; gap: 12px; }
+.login label { display: flex; flex-direction: column; gap: 4px; font-size: .88rem; color: var(--muted); }
+.login input { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.login input:focus { outline: 2px solid var(--focus); outline-offset: 1px; }
+.login .err { color: var(--bad); font-size: .9rem; margin: 0; min-height: 1.3em; }
+.cuenta { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; font-size: .88rem; color: var(--muted); }
+.medidor { display: flex; align-items: center; gap: 8px; font-family: var(--f-data); font-size: .8rem; }
+.medidor .barra { width: 110px; height: 6px; border-radius: 999px; background: var(--line); overflow: hidden; }
+.medidor .barra i { display: block; height: 100%; background: var(--accent); }
+.medidor.alto .barra i { background: var(--warn); }
+footer a { color: inherit; }
+</style>
+</head>
+<body>
+<section class="login panel" id="v-login" hidden>
+  <div>
+    <div class="eyebrow">Crédito automotriz · captura</div>
+    <h1>Captura de Expedientes</h1>
+  </div>
+  <form id="f-login" novalidate>
+    <label for="l-email">Correo<input id="l-email" type="email" autocomplete="username" required></label>
+    <label for="l-pass">Contraseña<input id="l-pass" type="password" autocomplete="current-password" required></label>
+    <p class="err" id="l-err" role="alert"></p>
+    <button class="btn primary" type="submit" id="l-btn">Entrar</button>
+  </form>
+  <p class="empty">¿No tienes cuenta? Pide acceso a quien te vendió el servicio.</p>
+</section>
+
+<div class="wrap" id="v-app" hidden>
+  <header class="top">
+    <div>
+      <div class="eyebrow" id="empresa">Crédito automotriz · captura</div>
+      <h1>Captura de Expedientes</h1>
+      <p>Arrastra la INE, la solicitud, la cotización y los estados de cuenta. Se enderezan las fotos, se leen y se arma la ficha con el promedio de abonos.</p>
+    </div>
+    <div class="cuenta">
+      <div class="medidor" id="medidor" title="Documentos leídos este mes"><span class="barra"><i id="medidor-i" style="width:0"></i></span><span id="medidor-t">—</span></div>
+      <div class="actions">
+        <button class="btn" id="ejemplo" type="button">Ver ejemplo</button>
+        <button class="btn" id="nuevo" type="button">Nuevo expediente</button>
+        <button class="btn" id="salir" type="button">Salir</button>
+      </div>
+    </div>
+  </header>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <div class="grid">
+    <section class="panel" aria-labelledby="h-docs">
+      <h2 id="h-docs">Documentos</h2>
+      <label class="drop" id="drop">
+        <input id="file" type="file" multiple accept="image/jpeg,image/png,image/webp,application/pdf">
+        <strong id="drop-t">Arrastra aquí todos los documentos del cliente</strong>
+        <span>INE, solicitud, cotización y estados de cuenta, juntos o por partes · o toca para elegir varios · JPG, PNG o PDF</span>
+      </label>
+      <ul class="checklist" id="checklist" aria-label="Documentos requeridos"></ul>
+      <button class="btn primary" id="procesar" type="button" disabled>Leer documentos</button>
+      <ol class="files" id="files"></ol>
+      <p class="empty" id="files-empty">Aún no hay archivos. Suelta todos los documentos juntos: se leen solos y se detecta qué es cada uno. Cada archivo cuenta como un documento de tu plan.</p>
+    </section>
+
+    <section class="panel" aria-labelledby="h-ficha">
+      <div class="sumhead">
+        <div class="left"><h2 id="h-ficha">Ficha del cliente</h2><span class="badge" id="badge-ejemplo" hidden>Ejemplo</span></div>
+        <div class="actions">
+          <button class="btn small" id="copiar" type="button">Copiar ficha</button>
+          <button class="btn small" id="csv" type="button">Descargar CSV</button>
+        </div>
+      </div>
+      <div class="fields" id="fields"></div>
+      <div>
+        <div class="eyebrow" style="margin-bottom:6px">Estados de cuenta · se promedian los 3 más recientes</div>
+        <div class="tablewrap" id="estados"></div>
+      </div>
+      <ul class="verificados" id="verificados" hidden aria-label="Verificado"></ul>
+      <ul class="avisos" id="avisos" hidden></ul>
+    </section>
+  </div>
+
+  <footer>Los archivos no se guardan: se leen y se descartan al terminar. Revisa siempre los datos marcados antes de usarlos en una solicitud. <a href="/privacidad">Aviso de privacidad</a></footer>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+"use strict";
+const S = { files: [], overrides: {}, ejemplo: false, uso: null };
+let nextId = 1;
+const $ = (id) => document.getElementById(id);
+const MXN = new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" });
+const ETIQ = { ine: "INE", estado_cuenta: "Estado de cuenta", solicitud: "Solicitud", cotizacion: "Cotización", otro: "No reconocido" };
+
+/* ---------------- servidor ---------------- */
+async function api(ruta, opts = {}) {
+  const r = await fetch(ruta, { credentials: "same-origin", ...opts });
+  let datos = null; try { datos = await r.json(); } catch {}
+  if (r.status === 401 && ruta !== "/api/login") { mostrarLogin(); throw new Error("Tu sesión terminó. Vuelve a entrar."); }
+  if (!r.ok) throw new Error(datos?.detail || datos?.error || "Error del servidor. Intenta de nuevo.");
+  return datos;
+}
+function mostrarLogin() { $("v-app").hidden = true; $("v-login").hidden = false; $("l-email").focus(); }
+async function entrar() {
+  try {
+    const me = await api("/api/me");
+    $("empresa").textContent = me.empresa;
+    S.uso = me.uso; $("v-login").hidden = true; $("v-app").hidden = false; render();
+  } catch { mostrarLogin(); }
+}
+$("f-login").addEventListener("submit", async (e) => {
+  e.preventDefault(); $("l-err").textContent = ""; $("l-btn").disabled = true;
+  try {
+    await api("/api/login", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: $("l-email").value, password: $("l-pass").value }) });
+    $("l-pass").value = ""; await entrar();
+  } catch (err) { $("l-err").textContent = err.message; }
+  finally { $("l-btn").disabled = false; }
+});
+$("salir").addEventListener("click", async () => { try { await api("/api/logout", { method: "POST" }); } catch {} limpiar(); render(); mostrarLogin(); });
+
+/* ---------------- normalizar respuesta ---------------- */
+const SECCIONES = {
+  ine: ["nombre_completo", "fecha_nacimiento", "curp", "calle_numero", "colonia", "cp", "municipio_estado", "vigencia"],
+  estado_cuenta: ["banco", "titular", "periodo_inicio", "periodo_fin", "total_depositos_abonos", "suma_abonos_movimientos", "cuenta_terminacion", "saldo_inicial", "total_retiros_cargos", "saldo_final", "evidencia_total"],
+  solicitud: ["nombre_completo", "correo", "telefono_celular", "calle_numero", "colonia", "cp", "municipio_estado"],
+  cotizacion: ["marca", "modelo", "anio", "precio"],
+};
+const NUMERICOS = new Set(["total_depositos_abonos", "suma_abonos_movimientos", "precio", "anio", "vigencia", "saldo_inicial", "total_retiros_cargos", "saldo_final"]);
+function num(v) { if (v === null || v === undefined || v === "") return null; if (typeof v === "number") return isFinite(v) ? v : null; const n = parseFloat(String(v).replace(/[$,\s]/g, "")); return isFinite(n) ? n : null; }
+function txt(v) { if (v === null || v === undefined) return null; const s = String(v).trim(); return s && s.toLowerCase() !== "null" ? s : null; }
+function normalizar(lista) {
+  return (lista || []).map((d) => {
+    const tipo = SECCIONES[d?.tipo] ? d.tipo : "otro";
+    const out = { tipo, legible: d?.legible !== false, dudas: Array.isArray(d?.dudas) ? d.dudas.map(String) : [] };
+    if (tipo !== "otro") { const sec = d[tipo] || {}; out[tipo] = {}; for (const k of SECCIONES[tipo]) out[tipo][k] = NUMERICOS.has(k) ? num(sec[k]) : txt(sec[k]); }
+    return out;
+  });
+}
+
+/* ---------------- leer un archivo ---------------- */
+async function procesar(item) {
+  item.paso = "Enviando y leyendo…"; render();
+  const fd = new FormData(); fd.append("archivo", item.file, item.name);
+  const r = await api("/api/leer", { method: "POST", body: fd });
+  item.docs = normalizar(r.documentos); item.ajustes = r.ajustes || []; S.uso = r.uso;
+  if (!item.docs.length) throw new Error("No se encontró ningún documento en el archivo.");
+}
+
+/* ---------------- ficha ---------------- */
+const sinAcentos = (s) => (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase().replace(/[^A-Z ]/g, " ").split(/\s+/).filter(Boolean);
+const CURP_RE = /^[A-Z]{4}\d{6}[HMX][A-Z]{5}[A-Z0-9]\d$/;
+function fechaDeCurp(c) { if (!CURP_RE.test(c || "")) return null; return `${/\d/.test(c[16]) ? "19" : "20"}${c.slice(4, 6)}-${c.slice(6, 8)}-${c.slice(8, 10)}`; }
+function mismoNombre(a, b) { const A = new Set(sinAcentos(a)), B = sinAcentos(b); if (!A.size || !B.length) return true; return B.filter((x) => A.has(x)).length >= Math.min(2, B.length); }
+function curpVsNombre(curp, nombre) {
+  const ini = new Set(sinAcentos(nombre).map((w) => w[0]));
+  return [curp[0], curp[2], curp[3]].every((c) => c === "X" || ini.has(c));
+}
+function fusionar(docs, tipo) {
+  const out = {}; let hay = false;
+  for (const d of docs) if (d.tipo === tipo && d[tipo] && d.legible) { hay = true; for (const [k, v] of Object.entries(d[tipo])) if (out[k] == null && v != null) out[k] = v; }
+  return hay ? out : null;
+}
+function armarFicha() {
+  const docs = S.files.flatMap((f) => f.docs || []);
+  const ine = fusionar(docs, "ine"), sol = fusionar(docs, "solicitud"), cot = fusionar(docs, "cotizacion");
+  const avisos = [], vistos = new Set(), estados = [];
+  for (const d of docs) if (d.tipo === "estado_cuenta" && d.estado_cuenta && d.legible) {
+    const e = d.estado_cuenta, k = `${(e.banco || "").toLowerCase()}|${e.periodo_fin || ""}`;
+    if (e.periodo_fin && vistos.has(k)) continue; vistos.add(k); estados.push(e);
+  }
+  estados.sort((a, b) => (b.periodo_fin || "").localeCompare(a.periodo_fin || ""));
+  const conTotal = estados.filter((e) => e.total_depositos_abonos !== null), usados = conTotal.slice(0, 3);
+  for (const e of estados) if (e.total_depositos_abonos === null) avisos.push(`Estado de cuenta ${e.banco || ""} ${e.periodo_fin || ""}: no se leyó el total de abonos; no entra al promedio.`);
+  for (const e of usados) { const s = e.suma_abonos_movimientos;
+    if (s && e.total_depositos_abonos && Math.abs(s - e.total_depositos_abonos) / e.total_depositos_abonos > 0.02)
+      avisos.push(`${e.banco || "Estado"} ${e.periodo_fin || ""}: el resumen dice ${MXN.format(e.total_depositos_abonos)} pero los movimientos suman ${MXN.format(s)}.`); }
+  if (usados.length && usados.length < 3) avisos.push(`Solo hay ${usados.length} estado(s) de cuenta con total; el promedio usa esos.`);
+  if (usados.length >= 2) { const meses = usados.map((e) => (e.periodo_fin || "").slice(0, 7)).filter(Boolean);
+    if (new Set(meses).size < meses.length) avisos.push("Dos estados de cuenta tienen el mismo mes de corte; revisa que no sean de cuentas distintas del mismo mes."); }
+  const promedio = usados.length ? usados.reduce((s, e) => s + e.total_depositos_abonos, 0) / usados.length : null;
+  let dirSrc = null, D = null;
+  if (ine?.calle_numero) { D = ine; dirSrc = "INE"; }
+  else if (sol?.calle_numero) { D = sol; dirSrc = ine ? "Solicitud (la INE no trae calle)" : "Solicitud"; }
+  else if (ine) { D = ine; dirSrc = "INE (sin calle)"; }
+  const direccion = D ? [D.calle_numero, D.colonia, D.cp ? `CP ${D.cp}` : null, D.municipio_estado].filter(Boolean).join(", ") : null;
+  const nombre = ine?.nombre_completo || sol?.nombre_completo || null;
+  if (ine?.nombre_completo && sol?.nombre_completo && !mismoNombre(ine.nombre_completo, sol.nombre_completo))
+    avisos.push(`El nombre de la solicitud (${sol.nombre_completo}) no coincide con el de la INE.`);
+  for (const e of usados) if (nombre && e.titular && !mismoNombre(nombre, e.titular))
+    avisos.push(`El titular del estado de cuenta ${e.banco || ""} ${e.periodo_fin || ""} (${e.titular}) no coincide con el cliente.`);
+  for (const f of S.files) for (const d of f.docs || []) {
+    if (!d.legible) avisos.push(`${f.name}: ${ETIQ[d.tipo]} ilegible; pide otra foto.`);
+    for (const x of d.dudas) avisos.push(`${ETIQ[d.tipo]} · ${x}`);
+  }
+  // ---- estados de cuenta en $0 ----
+  const cero = (x) => x != null && Math.abs(x) < 0.01;
+  for (const e of estados) {
+    const cual = `${e.banco || "Estado de cuenta"} ${e.periodo_fin || ""}`.trim(), enPromedio = usados.includes(e);
+    if (cero(e.total_depositos_abonos) && cero(e.saldo_final) && (e.saldo_inicial == null || cero(e.saldo_inicial)))
+      avisos.push(`${cual}: todo está en $0 (sin depósitos y sin saldo); parece una cuenta sin uso${enPromedio ? ". Cuenta como $0 en el promedio" : ""}.`);
+    else {
+      if (cero(e.total_depositos_abonos)) avisos.push(`${cual}: no tiene depósitos/abonos en el periodo ($0)${enPromedio ? "; cuenta como $0 en el promedio" : ""}.`);
+      if (cero(e.saldo_final)) avisos.push(`${cual}: termina el periodo con saldo $0.`);
+    }
+  }
+  if (usados.length && usados.every((e) => cero(e.total_depositos_abonos))) avisos.push("Ningún estado de cuenta usado tiene depósitos: el promedio de abonos es $0.");
+  // ---- verificaciones cruzadas: lo que se confirma va a "verificados", lo que no cuadra a "avisos" ----
+  const verificados = [];
+  const cerca = (a, b) => Math.abs(a - b) <= Math.max(1, 0.005 * Math.max(Math.abs(b), 1));
+  const cuadra = (e) => [e.saldo_inicial, e.total_depositos_abonos, e.total_retiros_cargos, e.saldo_final].every((x) => x != null)
+    ? cerca(e.saldo_inicial + e.total_depositos_abonos - e.total_retiros_cargos, e.saldo_final) : null;
+  const conSaldos = usados.filter((e) => cuadra(e) !== null);
+  if (conSaldos.length && conSaldos.every((e) => cuadra(e)))
+    verificados.push(conSaldos.length === usados.length ? (usados.length === 1 ? "Los saldos del estado de cuenta cuadran (inicial + abonos − cargos = final)." : `Los saldos cuadran en los ${usados.length} estados de cuenta (inicial + abonos − cargos = final).`)
+      : `Los saldos cuadran en ${conSaldos.length} de los ${usados.length} estados de cuenta.`);
+  const grupos = {};
+  for (const e of estados) if (e.periodo_fin) (grupos[`${(e.banco || "").toLowerCase()}|${e.cuenta_terminacion || ""}`] ||= []).push(e);
+  let pares = 0, rotos = 0;
+  for (const g of Object.values(grupos)) {
+    g.sort((a, b) => a.periodo_fin.localeCompare(b.periodo_fin));
+    for (let i = 1; i < g.length; i++) {
+      const a = g[i - 1], b = g[i];
+      if (a.saldo_final == null || b.saldo_inicial == null) continue;
+      pares++;
+      if (!cerca(a.saldo_final, b.saldo_inicial)) { rotos++;
+        avisos.push(`${b.banco || "Estado de cuenta"}: el saldo final de ${a.periodo_fin} (${MXN.format(a.saldo_final)}) no es igual al saldo inicial de ${b.periodo_fin} (${MXN.format(b.saldo_inicial)}). Puede faltar un estado de cuenta, ser de otra cuenta o estar alterado.`); }
+    }
+  }
+  if (pares && !rotos) verificados.push(`Los saldos se encadenan de un mes al siguiente (${pares} ${pares === 1 ? "cambio de mes revisado" : "cambios de mes revisados"}).`);
+  const mesN = (f) => { const m = /^(\d{4})-(\d{2})/.exec(f || ""); return m ? +m[1] * 12 + +m[2] : null; };
+  if (usados.length >= 2) {
+    const ms = usados.map((e) => mesN(e.periodo_fin)).filter((x) => x != null);
+    if (ms.slice(1).some((m, i) => ms[i] - m > 1)) avisos.push("Los estados de cuenta usados no son de meses seguidos; falta al menos un mes.");
+    else if (ms.length === usados.length && new Set(ms).size === ms.length) verificados.push(`Son ${usados.length} meses seguidos.`);
+  }
+  if (usados[0]?.periodo_fin) {
+    const dias = (Date.now() - Date.parse(usados[0].periodo_fin + "T00:00:00")) / 86400000;
+    if (dias > 60) avisos.push(`El estado de cuenta más reciente corta el ${usados[0].periodo_fin}: tiene más de 2 meses.`);
+    else if (dias >= 0) verificados.push("El estado de cuenta más reciente tiene menos de 2 meses.");
+  }
+  if (nombre && usados.some((e) => e.titular) && usados.every((e) => !e.titular || mismoNombre(nombre, e.titular)))
+    verificados.push("El titular de los estados de cuenta coincide con el cliente.");
+  if (ine?.nombre_completo && sol?.nombre_completo && mismoNombre(ine.nombre_completo, sol.nombre_completo))
+    verificados.push("El nombre de la solicitud coincide con la INE.");
+  if (ine?.curp && ine.fecha_nacimiento && fechaDeCurp(ine.curp) === ine.fecha_nacimiento && (!ine.nombre_completo || curpVsNombre(ine.curp, ine.nombre_completo)))
+    verificados.push(ine.nombre_completo ? "La CURP coincide con la fecha de nacimiento y el nombre." : "La CURP coincide con la fecha de nacimiento.");
+  if (ine?.vigencia && ine.vigencia >= new Date().getFullYear()) verificados.push(`La INE está vigente (hasta ${ine.vigencia}).`);
+  if (ine?.cp && sol?.cp) {
+    if (ine.cp.trim() !== sol.cp.trim()) avisos.push(`El CP de la solicitud (${sol.cp}) es distinto al de la INE (${ine.cp}); el cliente pudo cambiar de domicilio.`);
+    else verificados.push("El código postal de la solicitud coincide con la INE.");
+  }
+  return {
+    campos: {
+      nombre: { v: nombre, src: ine?.nombre_completo ? "INE" : sol?.nombre_completo ? "Solicitud" : null },
+      fecha_nacimiento: { v: ine?.fecha_nacimiento || null, src: ine?.fecha_nacimiento ? "INE" : null },
+      direccion: { v: direccion, src: dirSrc },
+      correo: { v: sol?.correo || null, src: sol?.correo ? "Solicitud" : null },
+      celular: { v: sol?.telefono_celular || null, src: sol?.telefono_celular ? "Solicitud" : null },
+      promedio_abonos: { v: promedio === null ? null : MXN.format(promedio), src: usados.length ? `Promedio de ${usados.length} estado(s) de cuenta` : null },
+      auto_modelo: { v: cot ? [cot.marca, cot.modelo].filter(Boolean).join(" ") || null : null, src: cot ? "Cotización" : null },
+      auto_anio: { v: cot?.anio != null ? String(cot.anio) : null, src: cot?.anio != null ? "Cotización" : null },
+      auto_precio: { v: cot?.precio != null ? MXN.format(cot.precio) : null, src: cot?.precio != null ? "Cotización" : null },
+    },
+    estados, usados, promedio, avisos: [...new Set(avisos)], verificados,
+    tiene: { ine: !!ine, solicitud: !!sol, cotizacion: !!cot, estados: conTotal.length },
+  };
+}
+const ETQ_CAMPOS = { nombre: "Nombre completo", fecha_nacimiento: "Fecha de nacimiento", direccion: "Dirección", correo: "Correo", celular: "Celular",
+  promedio_abonos: "Promedio de abonos", auto_modelo: "Auto (marca y modelo)", auto_anio: "Año del auto", auto_precio: "Precio del auto" };
+const valor = (ficha, k) => S.overrides[k] ?? ficha.campos[k].v ?? "";
+
+/* ---------------- interfaz ---------------- */
+function render() {
+  const ficha = armarFicha();
+  const req = [["INE", ficha.tiene.ine], ["Solicitud", ficha.tiene.solicitud], ["Cotización", ficha.tiene.cotizacion],
+    [`Estados de cuenta ${Math.min(3, ficha.tiene.estados)}/3`, ficha.tiene.estados >= 3]];
+  $("checklist").replaceChildren(...req.map(([t, ok]) => el("li", { className: ok ? "ok" : "" }, t)));
+  const pend = S.files.filter((f) => f.status === "pendiente").length, corriendo = S.files.some((f) => f.status === "procesando");
+  $("procesar").disabled = !pend || corriendo;
+  $("procesar").textContent = corriendo ? "Leyendo…" : pend ? `Leer ${pend} documento${pend > 1 ? "s" : ""}` : "Leer documentos";
+  $("files-empty").hidden = S.files.length > 0;
+  $("drop-t").textContent = S.files.length ? "Agregar más documentos" : "Arrastra aquí todos los documentos del cliente";
+  $("procesar").hidden = !pend;
+  $("files").replaceChildren(...S.files.map(filaArchivo));
+  $("badge-ejemplo").hidden = !S.ejemplo;
+  $("fields").replaceChildren(...Object.keys(ETQ_CAMPOS).map((k) => filaCampo(ficha, k)));
+  if (!ficha.estados.length) $("estados").replaceChildren(el("p", { className: "empty" }, "Sin estados de cuenta todavía."));
+  else {
+    const usados = new Set(ficha.usados);
+    $("estados").replaceChildren(el("table", {},
+      el("thead", {}, el("tr", {}, el("th", {}, "Banco"), el("th", {}, "Corte"), el("th", { className: "num" }, "Depósitos / abonos"))),
+      el("tbody", {}, ...ficha.estados.map((e) => el("tr", { className: usados.has(e) ? "" : "unused", title: usados.has(e) ? "" : "No entra al promedio" },
+        el("td", {}, e.banco || "—"), el("td", {}, e.periodo_fin || "—"),
+        el("td", { className: "num" + (e.total_depositos_abonos !== null && Math.abs(e.total_depositos_abonos) < 0.01 ? " cero" : "") }, e.total_depositos_abonos === null ? "no legible" : MXN.format(e.total_depositos_abonos))))),
+      ficha.promedio === null ? "" : el("tfoot", {}, el("tr", {}, el("td", { colSpan: 2 }, `Promedio (${ficha.usados.length})`), el("td", { className: "num" }, MXN.format(ficha.promedio))))));
+  }
+  $("verificados").hidden = !ficha.verificados.length;
+  $("verificados").replaceChildren(...ficha.verificados.map((a) => el("li", {}, a)));
+  $("avisos").hidden = !ficha.avisos.length;
+  $("avisos").replaceChildren(...ficha.avisos.map((a) => el("li", {}, a)));
+  if (S.uso) {
+    const pct = Math.min(100, S.uso.usados / Math.max(1, S.uso.limite) * 100);
+    $("medidor-i").style.width = pct + "%"; $("medidor").classList.toggle("alto", pct >= 85);
+    $("medidor-t").textContent = `${S.uso.usados} de ${S.uso.limite} este mes`;
+  }
+}
+function filaArchivo(f) {
+  const thumb = el("div", { className: "thumb" }, f.preview ? el("img", { src: f.preview, alt: "" }) : f.kind === "pdf" ? "PDF" : "IMG");
+  const estado = f.status === "pendiente" ? el("span", { className: "stamp wait" }, "Pendiente")
+    : f.status === "procesando" ? el("span", { className: "stamp run" }, f.paso || "Procesando…")
+    : f.status === "error" ? el("span", { className: "stamp err" }, "No se leyó") : null;
+  const tipos = (f.docs || []).map((d) => el("span", { className: "stamp doc" }, d.legible ? ETIQ[d.tipo] : ETIQ[d.tipo] + " · ilegible"));
+  const notas = el("ul", { className: "notes" },
+    ...(f.ajustes || []).map((a) => el("li", {}, (f.kind === "pdf" ? "PDF: " : "Foto: ") + a)),
+    ...(f.docs || []).flatMap((d) => d.dudas.map((x) => el("li", { className: "duda" }, x))),
+    ...(f.error ? [el("li", { className: "err" }, f.error)] : []));
+  const acciones = el("div", { className: "actions" });
+  if (f.status === "error" && f.file) acciones.append(el("button", { className: "btn small", type: "button", onclick: () => { f.status = "pendiente"; f.error = null; correr(); } }, "Reintentar"));
+  return el("li", { className: "file" }, thumb,
+    el("div", { style: "min-width:0" }, el("div", { className: "fname" }, f.name), el("div", { className: "fmeta" }, ...(estado ? [estado] : []), ...tipos), notas, acciones),
+    el("button", { className: "x", type: "button", title: "Quitar archivo", "aria-label": `Quitar ${f.name}`, disabled: f.status === "procesando",
+      onclick: () => { S.files = S.files.filter((x) => x !== f); if (f.preview) URL.revokeObjectURL(f.preview); render(); } }, "×"));
+}
+function filaCampo(ficha, k) {
+  const c = ficha.campos[k], editado = S.overrides[k] !== undefined;
+  const input = k === "direccion"
+    ? el("textarea", { id: "f-" + k, rows: 2, value: valor(ficha, k), placeholder: "no proporcionado" })
+    : el("input", { id: "f-" + k, type: "text", value: valor(ficha, k), placeholder: "no proporcionado", autocomplete: "off" });
+  input.addEventListener("change", () => { const v = input.value.trim(); if (v === (c.v ?? "")) delete S.overrides[k]; else S.overrides[k] = v; render(); });
+  return el("div", { className: "field" + (k === "promedio_abonos" ? " big" : "") },
+    el("label", { htmlFor: "f-" + k }, ETQ_CAMPOS[k]), input,
+    el("button", { className: "copy", type: "button", "aria-label": `Copiar ${ETQ_CAMPOS[k]}`, onclick: () => copiar(input.value, ETQ_CAMPOS[k]) }, "Copiar"),
+    el("div", { className: "src" + (editado ? " edit" : "") }, editado ? "Corregido a mano" : c.src ? "Fuente: " + c.src : ""));
+}
+function el(tag, props = {}, ...hijos) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) { if (k.startsWith("on")) e.addEventListener(k.slice(2), v); else if (k in e && k !== "style") e[k] = v; else e.setAttribute(k, v); }
+  for (const h of hijos) if (h !== "" && h != null) e.append(h);
+  return e;
+}
+function aviso(t) { const n = $("toast"); n.textContent = t; n.hidden = false; clearTimeout(aviso.t); aviso.t = setTimeout(() => n.hidden = true, 2200); }
+async function copiar(texto, que) {
+  if (!texto) { aviso("No hay nada que copiar"); return; }
+  try { await navigator.clipboard.writeText(texto); aviso(`${que} copiado`); }
+  catch { const t = el("textarea", { value: texto, style: "position:fixed;opacity:0" }); document.body.append(t); t.select(); try { document.execCommand("copy"); aviso(`${que} copiado`); } catch { aviso("Selecciona el texto y cópialo a mano"); } t.remove(); }
+}
+function textoFicha() {
+  const f = armarFicha();
+  const lineas = Object.keys(ETQ_CAMPOS).map((k) => `${ETQ_CAMPOS[k]}: ${valor(f, k) || "no proporcionado"}`);
+  if (f.usados.length) lineas.push("", "Estados de cuenta usados:", ...f.usados.map((e) => `  ${e.banco || "—"} ${e.periodo_fin || ""}: ${MXN.format(e.total_depositos_abonos)}`));
+  if (f.avisos.length) lineas.push("", "Revisar:", ...f.avisos.map((a) => "  - " + a));
+  return lineas.join("\n");
+}
+
+/* ---------------- cola ---------------- */
+let activos = 0;
+function correr() {
+  while (activos < 2) {
+    const f = S.files.find((x) => x.status === "pendiente"); if (!f) break;
+    f.status = "procesando"; f.error = null; f.docs = null; activos++;
+    procesar(f).then(() => { f.status = "listo"; f.paso = null; })
+      .catch((e) => { f.status = "error"; f.paso = null; f.error = e.message; })
+      .finally(() => { activos--; render(); correr(); });
+  }
+  render();
+}
+function agregar(lista) {
+  if (S.ejemplo) limpiar();
+  for (const file of lista) {
+    if (!/^(image\/(jpeg|png|webp)|application\/pdf)$/.test(file.type)) { aviso(`${file.name}: usa JPG, PNG o PDF`); continue; }
+    if (file.size > 20 * 1024 * 1024) { aviso(`${file.name}: pasa de 20 MB`); continue; }
+    const kind = file.type === "application/pdf" ? "pdf" : "img";
+    S.files.push({ id: nextId++, file, name: file.name, kind, status: "pendiente", docs: null, ajustes: [], preview: kind === "img" ? URL.createObjectURL(file) : null });
+  }
+  correr();   // se empiezan a leer solos
+}
+function limpiar() { S.files.forEach((f) => f.preview && URL.revokeObjectURL(f.preview)); S.files = []; S.overrides = {}; S.ejemplo = false; }
+
+/* ---------------- ejemplo (datos inventados) ---------------- */
+function cargarEjemplo() {
+  limpiar(); S.ejemplo = true;
+  const E = (tipo, sec, dudas = []) => ({ tipo, legible: true, [tipo]: sec, dudas });
+  S.files = [
+    { id: nextId++, name: "ine_frente.jpg", kind: "img", status: "listo", ajustes: ["estaba de lado (la giré a la derecha)", "enderecé 2.4° de inclinación"],
+      docs: [E("ine", { nombre_completo: "MARÍA GUADALUPE HERNÁNDEZ RUIZ", fecha_nacimiento: "1988-07-14", curp: "HERG880714MDFRZD05", calle_numero: null, colonia: "COL. SANTA MARTHA", cp: "09510", municipio_estado: "IZTAPALAPA, CDMX", vigencia: 2031 })] },
+    { id: nextId++, name: "solicitud.jpg", kind: "img", status: "listo", ajustes: ["recorté el documento y corregí la perspectiva"],
+      docs: [E("solicitud", { nombre_completo: "María Guadalupe Hernández Ruiz", correo: "lupita.hdz88@gmail.com", telefono_celular: "5523418876", calle_numero: "Calle Ermita 214 int. 3", colonia: "Santa Martha", cp: "09510", municipio_estado: "Iztapalapa, CDMX" },
+        ["dominio 'gmial.com' parece error de dedo; lo cambié a gmail.com", "celular: 5523418876 o 5523418816"])] },
+    { id: nextId++, name: "cotizacion_versa.pdf", kind: "pdf", status: "listo", ajustes: [],
+      docs: [E("cotizacion", { marca: "Nissan", modelo: "Versa Advance CVT", anio: 2026, precio: 359900 })] },
+    { id: nextId++, name: "estados_bbva.pdf", kind: "pdf", status: "listo", ajustes: [],
+      docs: [E("estado_cuenta", { banco: "BBVA", titular: "MARIA GUADALUPE HERNANDEZ RUIZ", periodo_inicio: "2026-10-01", periodo_fin: "2026-10-31", total_depositos_abonos: 31250.4, suma_abonos_movimientos: 31250.4, saldo_inicial: 17024.65, total_retiros_cargos: 29875.05, saldo_final: 18400, cuenta_terminacion: "4821" }),
+             E("estado_cuenta", { banco: "BBVA", titular: "MARIA GUADALUPE HERNANDEZ RUIZ", periodo_inicio: "2026-09-01", periodo_fin: "2026-09-30", total_depositos_abonos: 28900, suma_abonos_movimientos: null, saldo_inicial: 15375.15, total_retiros_cargos: 27250.5, saldo_final: 17024.65, cuenta_terminacion: "4821" }),
+             E("estado_cuenta", { banco: "BBVA", titular: "MARIA GUADALUPE HERNANDEZ RUIZ", periodo_inicio: "2026-08-01", periodo_fin: "2026-08-31", total_depositos_abonos: 33475.15, suma_abonos_movimientos: null, saldo_inicial: 12000, total_retiros_cargos: 30100, saldo_final: 15375.15, cuenta_terminacion: "4821" }),
+             E("estado_cuenta", { banco: "BBVA", titular: "MARIA GUADALUPE HERNANDEZ RUIZ", periodo_inicio: "2026-07-01", periodo_fin: "2026-07-31", total_depositos_abonos: 25010, suma_abonos_movimientos: null, saldo_inicial: 9800, total_retiros_cargos: 22810, saldo_final: 12000, cuenta_terminacion: "4821" })] },
+  ];
+  render();
+}
+
+/* ---------------- arranque ---------------- */
+const drop = $("drop");
+$("file").addEventListener("change", (e) => { agregar([...e.target.files]); e.target.value = ""; });
+["dragenter", "dragover"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop", (e) => agregar([...(e.dataTransfer?.files || [])]));
+document.addEventListener("paste", (e) => { const fs = [...(e.clipboardData?.files || [])]; if (fs.length && !$("v-app").hidden) agregar(fs); });
+$("procesar").addEventListener("click", correr);
+$("nuevo").addEventListener("click", () => { if (S.files.some((f) => f.status === "procesando")) { aviso("Espera a que termine de leer"); return; } limpiar(); render(); aviso("Expediente nuevo"); });
+$("ejemplo").addEventListener("click", () => { if (!S.files.some((f) => f.status === "procesando")) cargarEjemplo(); });
+$("copiar").addEventListener("click", () => copiar(textoFicha(), "Ficha"));
+$("csv").addEventListener("click", () => {
+  const f = armarFicha(), keys = Object.keys(ETQ_CAMPOS), q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const csv = "﻿" + keys.map((k) => q(ETQ_CAMPOS[k])).join(",") + "\n" + keys.map((k) => q(valor(f, k))).join(",") + "\n";
+  const nombre = (valor(f, "nombre") || "expediente").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^A-Za-z0-9]+/g, "_").slice(0, 40);
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  const a = el("a", { href: url, download: `ficha_${nombre}.csv` }); document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
+window.addEventListener("beforeunload", (e) => { if (S.files.some((f) => f.status === "procesando")) e.preventDefault(); });
+render();
+entrar();
+</script>
+</body>
+</html>

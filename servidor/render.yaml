@@ -1,0 +1,15 @@
+# Render: New + > Blueprint > elige este repositorio. Llena las variables marcadas sync:false en el panel.
+services:
+  - type: web
+    name: captura-expedientes-beta
+    runtime: docker
+    plan: free
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: BETA_EMAIL
+        sync: false
+      - key: BETA_PASSWORD
+        sync: false
+      - key: DB_PATH
+        value: /tmp/datos.db

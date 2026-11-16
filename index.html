@@ -1,0 +1,1097 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Captura de Expedientes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+body{margin:0}img{max-width:100%}[hidden]{display:none!important}
+.config label{display:flex;flex-direction:column;gap:4px;font-size:.88rem;color:var(--muted)}
+.config input,.config select{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:9px 11px}
+.config .fila{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:12px}
+@media (max-width:640px){.config .fila{grid-template-columns:minmax(0,1fr)}}
+.gasto{font-family:var(--f-data);font-size:.78rem;color:var(--muted)}
+/* Layout: mesa de trabajo de crédito — izquierda lo que entra (documentos), derecha lo que sale (ficha capturada). */
+:root {
+  --bg: #f3f5f7;
+  --surface: #ffffff;
+  --ink: #14202b;
+  --muted: #5a6775;
+  --line: #dce2e8;
+  --accent: #116d4e;
+  --accent-ink: #ffffff;
+  --accent-soft: #e2f1ea;
+  --warn: #9a5800;
+  --warn-soft: #fbefd9;
+  --bad: #b3261e;
+  --bad-soft: #fce8e6;
+  --focus: #2f6fdb;
+  --f-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-display: "IBM Plex Sans Condensed", "IBM Plex Sans", system-ui, sans-serif;
+  --f-data: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --r: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1318; --surface: #151c23; --ink: #e4ebf1; --muted: #92a0ae; --line: #26313b;
+    --accent: #4cc197; --accent-ink: #062016; --accent-soft: #10291f;
+    --warn: #efb24f; --warn-soft: #2b200f; --bad: #ff8b7c; --bad-soft: #321713; --focus: #7aa7ff;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1318; --surface: #151c23; --ink: #e4ebf1; --muted: #92a0ae; --line: #26313b;
+  --accent: #4cc197; --accent-ink: #062016; --accent-soft: #10291f;
+  --warn: #efb24f; --warn-soft: #2b200f; --bad: #ff8b7c; --bad-soft: #321713; --focus: #7aa7ff;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 15px; line-height: 1.5;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 40px;
+}
+.wrap { max-width: 1180px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+h1, h2, h3 { font-family: var(--f-display); font-weight: 600; margin: 0; text-wrap: balance; letter-spacing: .01em; }
+h1 { font-size: 1.75rem; line-height: 1.15; }
+h2 { font-size: 1.15rem; }
+.eyebrow { font-family: var(--f-data); font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+button { font: inherit; cursor: pointer; }
+button:focus-visible, input:focus-visible, label.drop:focus-within { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+header.top { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: end; justify-content: space-between; }
+header.top p { margin: 4px 0 0; color: var(--muted); max-width: 62ch; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.btn { border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 8px; padding: 8px 14px; font-weight: 500; }
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.btn.primary:disabled { opacity: .45; cursor: not-allowed; }
+.btn.small { padding: 4px 10px; font-size: .85rem; }
+
+.banner { border-radius: var(--r); padding: 12px 16px; background: var(--bad-soft); color: var(--ink); border: 1px solid var(--bad); }
+.banner.warn { background: var(--warn-soft); border-color: var(--warn); }
+
+.grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 20px; align-items: start; }
+@media (max-width: 880px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 18px; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+
+label.drop {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; text-align: center;
+  border: 1.5px dashed var(--line); border-radius: var(--r); padding: 26px 16px; cursor: pointer; background: var(--bg);
+  transition: border-color .15s, background .15s;
+}
+label.drop:hover, label.drop.over { border-color: var(--accent); background: var(--accent-soft); }
+label.drop strong { font-family: var(--f-display); font-size: 1.05rem; font-weight: 600; }
+label.drop span { color: var(--muted); font-size: .9rem; }
+label.drop input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+
+.checklist { display: flex; flex-wrap: wrap; gap: 6px; padding: 0; margin: 0; list-style: none; }
+.checklist li { font-family: var(--f-data); font-size: .78rem; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.checklist li.ok { background: var(--accent-soft); border-color: var(--accent); color: var(--ink); }
+.checklist li.ok::before { content: "✓ "; color: var(--accent); font-weight: 600; }
+
+.files { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.file { display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; gap: 12px; align-items: start; padding: 10px; border: 1px solid var(--line); border-radius: 8px; }
+.thumb { width: 56px; height: 56px; border-radius: 6px; background: var(--bg); border: 1px solid var(--line); object-fit: cover; display: flex; align-items: center; justify-content: center; font-family: var(--f-data); font-size: .7rem; color: var(--muted); overflow: hidden; }
+.thumb img { width: 100%; height: 100%; object-fit: cover; }
+.fname { font-weight: 500; overflow-wrap: anywhere; }
+.fmeta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 4px; }
+.stamp { font-family: var(--f-data); font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; padding: 1px 7px; border: 1.5px solid currentColor; border-radius: 4px; }
+.stamp.doc { color: var(--accent); transform: rotate(-1.5deg); }
+.stamp.wait { color: var(--muted); }
+.stamp.run { color: var(--focus); }
+.stamp.err { color: var(--bad); }
+.notes { margin: 6px 0 0; padding: 0; list-style: none; font-size: .84rem; color: var(--muted); display: flex; flex-direction: column; gap: 2px; }
+.notes li.duda { color: var(--warn); }
+.notes li.err { color: var(--bad); }
+.x { border: 0; background: none; color: var(--muted); font-size: 1.2rem; line-height: 1; padding: 2px 6px; border-radius: 6px; }
+.x:hover { color: var(--bad); background: var(--bad-soft); }
+
+.sumhead { display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; align-items: center; }
+.sumhead .left { display: flex; gap: 10px; align-items: center; }
+.badge { font-family: var(--f-data); font-size: .7rem; text-transform: uppercase; letter-spacing: .08em; padding: 2px 8px; border-radius: 4px; background: var(--warn-soft); color: var(--warn); border: 1px solid var(--warn); }
+
+.fields { display: flex; flex-direction: column; }
+.field { display: grid; grid-template-columns: 150px minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--line); }
+.field:last-child { border-bottom: 0; }
+.field label { font-size: .85rem; color: var(--muted); }
+.field input, .field textarea { width: 100%; resize: vertical; line-height: 1.4; min-width: 0; font-family: var(--f-data); font-size: .92rem; color: var(--ink); background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 5px 8px; font-variant-numeric: tabular-nums; }
+.field input:hover, .field textarea:hover { border-color: var(--line); }
+.field input:focus, .field textarea:focus { border-color: var(--focus); outline: none; background: var(--bg); }
+.field input::placeholder, .field textarea::placeholder { color: var(--muted); opacity: .7; }
+.field .src { grid-column: 2 / 3; font-size: .76rem; color: var(--muted); padding-left: 9px; }
+.field .src.edit { color: var(--focus); }
+.field.big input { font-size: 1.15rem; font-weight: 500; }
+.copy { border: 1px solid var(--line); background: var(--surface); color: var(--muted); border-radius: 6px; font-size: .78rem; padding: 3px 8px; }
+.copy:hover { color: var(--ink); border-color: var(--muted); }
+@media (max-width: 520px) {
+  .field { grid-template-columns: minmax(0, 1fr) auto; }
+  .field label { grid-column: 1 / -1; }
+  .field .src { grid-column: 1 / -1; }
+}
+
+.tablewrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { font-weight: 500; color: var(--muted); font-size: .78rem; }
+td.num, th.num { text-align: right; font-family: var(--f-data); font-variant-numeric: tabular-nums; }
+td.cero { color: var(--bad); font-weight: 600; }
+tr.unused td { color: var(--muted); text-decoration: line-through; }
+tfoot td { font-weight: 600; border-bottom: 0; }
+
+.avisos { list-style: none; margin: 0; padding: 12px 14px; border-radius: 8px; background: var(--warn-soft); border: 1px solid var(--warn); display: flex; flex-direction: column; gap: 4px; font-size: .9rem; }
+.verificados { list-style: none; margin: 0; padding: 12px 14px; border-radius: 8px; background: var(--accent-soft); border: 1px solid var(--accent); display: flex; flex-direction: column; gap: 4px; font-size: .9rem; }
+.verificados li::before { content: "✓ "; color: var(--accent); font-weight: 600; }
+.avisos li::before { content: "▲ "; color: var(--warn); font-size: .75em; }
+.empty { color: var(--muted); font-size: .92rem; margin: 0; }
+.toast { position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 8px 14px; border-radius: 8px; font-size: .9rem; z-index: 20; }
+footer { color: var(--muted); font-size: .82rem; max-width: 80ch; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <div class="eyebrow">Crédito automotriz · captura</div>
+      <h1>Captura de Expedientes</h1>
+      <p>Arrastra la INE, la solicitud, la cotización y los estados de cuenta. La página endereza las fotos, las lee con Claude y arma la ficha con el promedio de abonos.</p>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
+      <div class="actions">
+        <button class="btn" id="ejemplo" type="button">Ver ejemplo</button>
+        <button class="btn" id="nuevo" type="button">Nuevo expediente</button>
+        <button class="btn" id="configurar" type="button">Configuración</button>
+      </div>
+      <span class="gasto" id="gasto">Gasto de esta sesión: $0.00 USD</span>
+    </div>
+  </header>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <section class="panel config" id="config" hidden aria-labelledby="h-config">
+    <h2 id="h-config">Configuración</h2>
+    <div class="fila">
+      <label for="c-clave">Clave de API de Anthropic
+        <input id="c-clave" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-...">
+      </label>
+      <label for="c-modelo">Modelo para leer
+        <select id="c-modelo">
+          <option value="claude-opus-5-5">Opus 5.5 · el más preciso con letra difícil</option>
+          <option value="claude-sonnet-5-5">Sonnet 5.5 · la mitad de costo</option>
+        </select>
+      </label>
+    </div>
+    <div class="actions">
+      <button class="btn primary" id="c-guardar" type="button">Guardar</button>
+      <button class="btn" id="c-cerrar" type="button">Cerrar</button>
+      <button class="btn" id="c-borrar" type="button">Borrar la clave de este navegador</button>
+    </div>
+    <p class="empty">Consigue la clave en console.anthropic.com → API Keys (necesita saldo). Se guarda solo en este navegador y solo se envía a Anthropic. No la uses en computadoras compartidas.</p>
+  </section>
+
+  <div class="grid">
+    <section class="panel" aria-labelledby="h-docs">
+      <h2 id="h-docs">Documentos</h2>
+      <label class="drop" id="drop">
+        <input id="file" type="file" multiple accept="image/jpeg,image/png,image/webp,application/pdf">
+        <strong id="drop-t">Arrastra aquí todos los documentos del cliente</strong>
+        <span>INE, solicitud, cotización y estados de cuenta, juntos o por partes · o toca para elegir varios · JPG, PNG o PDF</span>
+      </label>
+      <ul class="checklist" id="checklist" aria-label="Documentos requeridos"></ul>
+      <button class="btn primary" id="procesar" type="button" disabled>Leer documentos</button>
+      <ol class="files" id="files"></ol>
+      <p class="empty" id="files-empty">Aún no hay archivos. Suelta todos los documentos juntos: se leen solos y la página detecta qué es cada uno.</p>
+    </section>
+
+    <section class="panel" aria-labelledby="h-ficha">
+      <div class="sumhead">
+        <div class="left"><h2 id="h-ficha">Ficha del cliente</h2><span class="badge" id="badge-ejemplo" hidden>Ejemplo</span></div>
+        <div class="actions">
+          <button class="btn small" id="copiar" type="button">Copiar ficha</button>
+          <button class="btn small" id="csv" type="button">Descargar CSV</button>
+        </div>
+      </div>
+      <div class="fields" id="fields"></div>
+      <div>
+        <div class="eyebrow" style="margin-bottom:6px">Estados de cuenta · se promedian los 3 más recientes</div>
+        <div class="tablewrap" id="estados"></div>
+      </div>
+      <ul class="verificados" id="verificados" hidden aria-label="Verificado"></ul>
+      <ul class="avisos" id="avisos" hidden></ul>
+    </section>
+  </div>
+
+  <footer>Los archivos no se guardan: se procesan en este navegador y se envían a la API de Anthropic con tu clave solo para leerlos. Revisa siempre los datos marcados antes de usarlos en una solicitud.</footer>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+"use strict";
+/* ============================================================
+   Estado
+   ============================================================ */
+const S = { files: [], overrides: {}, ejemplo: false, sample: null, limits: null, downloads: null, bloqueado: false };
+let nextId = 1;
+const $ = (id) => document.getElementById(id);
+const MXN = new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" });
+const ETIQ = { ine: "INE", estado_cuenta: "Estado de cuenta", solicitud: "Solicitud", cotizacion: "Cotización", otro: "No reconocido" };
+
+if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+/* ============================================================
+   Imagen: enderezar, orientar, realzar
+   ============================================================ */
+const MAX_SIDE = 2400;
+function lienzo(w, h) { const c = document.createElement("canvas"); c.width = Math.max(1, Math.round(w)); c.height = Math.max(1, Math.round(h)); return c; }
+function escalado(src, maxSide) {
+  const sw = src.naturalWidth || src.width, sh = src.naturalHeight || src.height;
+  const s = Math.min(1, maxSide / Math.max(sw, sh));
+  const c = lienzo(sw * s, sh * s), x = c.getContext("2d");
+  x.fillStyle = "#fff"; x.fillRect(0, 0, c.width, c.height);
+  x.imageSmoothingQuality = "high"; x.drawImage(src, 0, 0, c.width, c.height);
+  return c;
+}
+/** Giro de 90/180/270 grados en sentido horario. */
+function girar90(src, deg) {
+  if (!deg) return src;
+  const w = src.width, h = src.height, swap = deg % 180 !== 0;
+  const c = lienzo(swap ? h : w, swap ? w : h), x = c.getContext("2d");
+  x.translate(c.width / 2, c.height / 2); x.rotate(deg * Math.PI / 180); x.drawImage(src, -w / 2, -h / 2);
+  return c;
+}
+/** Giro libre (grados, horario positivo) con fondo blanco. */
+function girarLibre(src, deg) {
+  const r = deg * Math.PI / 180, w = src.width, h = src.height, cs = Math.abs(Math.cos(r)), sn = Math.abs(Math.sin(r));
+  const c = lienzo(w * cs + h * sn, w * sn + h * cs), x = c.getContext("2d");
+  x.fillStyle = "#fff"; x.fillRect(0, 0, c.width, c.height);
+  x.translate(c.width / 2, c.height / 2); x.rotate(r); x.imageSmoothingQuality = "high"; x.drawImage(src, -w / 2, -h / 2);
+  return c;
+}
+function grises(src, maxSide) {
+  const c = escalado(src, maxSide), d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
+  const g = new Float32Array(c.width * c.height);
+  for (let i = 0, j = 0; j < g.length; i += 4, j++) g[j] = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+  return { g, w: c.width, h: c.height };
+}
+/** Nitidez promedio (bordes). Valores < 2 = foto muy borrosa. */
+function nitidez(src) {
+  const { g, w, h } = grises(src, 800);
+  let s = 0, n = 0;
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+    const i = y * w + x;
+    const v = 8 * g[i] - (g[i - 1] + g[i + 1] + g[i - w] + g[i + w] + g[i - w - 1] + g[i - w + 1] + g[i + w - 1] + g[i + w + 1]);
+    s += v < 0 ? 0 : v > 255 ? 255 : v; n++;
+  }
+  return n ? s / n : 0;
+}
+/** Inclinación del texto en grados (horario positivo). Para enderezar: girarLibre(c, -angulo). */
+function inclinacion(src) {
+  const { g, w, h } = grises(src, 800);
+  const W = w + 1, I = new Float64Array(W * (h + 1));
+  for (let y = 0; y < h; y++) { let fila = 0; for (let x = 0; x < w; x++) { fila += g[y * w + x]; I[(y + 1) * W + x + 1] = I[y * W + x + 1] + fila; } }
+  const r = 12, pts = [];
+  const x0 = Math.floor(w * .12), x1 = Math.ceil(w * .88), y0 = Math.floor(h * .12), y1 = Math.ceil(h * .88); // solo el centro
+  for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+    const xa = Math.max(0, x - r), xb = Math.min(w, x + r + 1), ya = Math.max(0, y - r), yb = Math.min(h, y + r + 1);
+    const media = (I[yb * W + xb] - I[ya * W + xb] - I[yb * W + xa] + I[ya * W + xa]) / ((xb - xa) * (yb - ya));
+    if (g[y * w + x] < media - 15) pts.push(x - w / 2, y - h / 2);
+  }
+  if (pts.length < 800) return 0;
+  const tam = Math.ceil(Math.hypot(w, h)) + 4, bins = new Float32Array(tam), n = pts.length / 2;
+  const puntaje = (deg) => {
+    const t = deg * Math.PI / 180, c = Math.cos(t), s = Math.sin(t);
+    bins.fill(0);
+    for (let i = 0; i < pts.length; i += 2) bins[(pts[i + 1] * c - pts[i] * s + tam / 2) | 0]++;
+    const m = n / tam; let v = 0;
+    for (let k = 0; k < tam; k++) { const d = bins[k] - m; v += d * d; }
+    return v;
+  };
+  let mejor = 0, mp = -1;
+  for (let a = -10; a <= 10.001; a += 0.5) { const p = puntaje(a); if (p > mp) { mp = p; mejor = a; } }
+  let fino = mejor;
+  for (let a = mejor - 0.5; a <= mejor + 0.501; a += 0.1) { const p = puntaje(a); if (p > mp) { mp = p; fino = a; } }
+  return Math.round(fino * 10) / 10;
+}
+/** Quita sombras / luz dispareja y sube contraste y nitidez. Devuelve un lienzo en grises. */
+function realzar(src) {
+  const w = src.width, h = src.height;
+  const datos = src.getContext("2d").getImageData(0, 0, w, h), p = datos.data;
+  const g = new Float32Array(w * h);
+  for (let i = 0, j = 0; j < g.length; i += 4, j++) g[j] = 0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2];
+  // Fondo = el papel: máximo por bloques, suavizado y estirado al tamaño completo
+  const b = Math.max(8, Math.round(Math.max(w, h) / 48)), bw = Math.ceil(w / b), bh = Math.ceil(h / b);
+  const mx = new Float32Array(bw * bh);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const k = ((y / b) | 0) * bw + ((x / b) | 0); const v = g[y * w + x]; if (v > mx[k]) mx[k] = v; }
+  const chico = lienzo(bw, bh), cd = chico.getContext("2d").createImageData(bw, bh);
+  for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) {
+    let s = 0, n = 0;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const yy = y + dy, xx = x + dx; if (yy >= 0 && yy < bh && xx >= 0 && xx < bw) { s += mx[yy * bw + xx]; n++; } }
+    const v = s / n, k = (y * bw + x) * 4; cd.data[k] = cd.data[k + 1] = cd.data[k + 2] = v; cd.data[k + 3] = 255;
+  }
+  chico.getContext("2d").putImageData(cd, 0, 0);
+  const grande = lienzo(w, h), gx = grande.getContext("2d");
+  gx.imageSmoothingEnabled = true; gx.imageSmoothingQuality = "high"; gx.drawImage(chico, 0, 0, w, h);
+  const B = gx.getImageData(0, 0, w, h).data;
+  const plano = new Float32Array(w * h), hist = new Uint32Array(256);
+  for (let j = 0; j < plano.length; j++) { const v = Math.min(255, g[j] / Math.max(B[j * 4], 1) * 255); plano[j] = v; hist[v | 0]++; }
+  // Estirar contraste entre el 1% y el 99%
+  let acc = 0, lo = 0, hi = 255; const tot = plano.length;
+  for (let v = 0; v < 256; v++) { acc += hist[v]; if (acc >= tot * .01) { lo = v; break; } }
+  acc = 0; for (let v = 255; v >= 0; v--) { acc += hist[v]; if (acc >= tot * .01) { hi = v; break; } }
+  const esc = 255 / Math.max(1, hi - lo);
+  for (let j = 0; j < plano.length; j++) plano[j] = Math.max(0, Math.min(255, (plano[j] - lo) * esc));
+  // Nitidez (máscara de enfoque 3x3)
+  const out = src.getContext("2d").createImageData(w, h), o = out.data;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const j = y * w + x; let v = plano[j];
+    if (x > 0 && y > 0 && x < w - 1 && y < h - 1) {
+      const m = (plano[j - 1] + plano[j + 1] + plano[j - w] + plano[j + w] + v) / 5;
+      v = v * 1.6 - m * 0.6;
+    }
+    v = v < 0 ? 0 : v > 255 ? 255 : v;
+    o[j * 4] = o[j * 4 + 1] = o[j * 4 + 2] = v; o[j * 4 + 3] = 255;
+  }
+  const c = lienzo(w, h); c.getContext("2d").putImageData(out, 0, 0);
+  return c;
+}
+/** Corta en franjas horizontales con un poco de traslape, para ver letra chica con más detalle. */
+function franjas(c, n) {
+  const res = [], ov = 0.06;
+  for (let i = 0; i < n; i++) {
+    const y0 = Math.max(0, Math.floor((i / n - ov) * c.height)), y1 = Math.min(c.height, Math.ceil(((i + 1) / n + ov) * c.height));
+    const t = lienzo(c.width, y1 - y0); t.getContext("2d").drawImage(c, 0, y0, c.width, y1 - y0, 0, 0, c.width, y1 - y0);
+    res.push(t);
+  }
+  return res;
+}
+const aBlob = (c, q = 0.9) => new Promise((ok, mal) => c.toBlob((b) => b ? ok(b) : mal(new Error("blob")), "image/jpeg", q));
+async function cargarImagen(file) {
+  const url = URL.createObjectURL(file);
+  try { const img = new Image(); img.src = url; await img.decode(); return img; }  // el navegador aplica la orientación EXIF
+  finally { setTimeout(() => URL.revokeObjectURL(url), 1000); }
+}
+
+/** Le pregunta a Claude (modelo rápido) en cuál de 4 giros se lee derecho el texto. Regresa grados horarios. */
+async function detectarGiro(c) {
+  if (!S.sample || (S.limits?.images?.maxCount ?? 0) < 4) return 0;
+  const mini = escalado(c, 640), giros = [0, 90, 180, 270];
+  const imgs = await Promise.all(giros.map((d) => aBlob(girar90(mini, d), 0.8)));
+  try {
+    const r = await S.sample.json(
+      "Te paso 4 imágenes: son la MISMA foto de un documento girada de 4 formas. La 1ª es la opción A, la 2ª la B, la 3ª la C y la 4ª la D. " +
+      "¿En qué opción el texto principal se lee derecho (renglones horizontales, de izquierda a derecha, no de cabeza)? " +
+      'Responde solo JSON: {"opcion": "A"}', { images: imgs, modelTier: "quick", schema: ESQUEMA_GIRO });
+    return { A: 0, B: 90, C: 180, D: 270 }[String(r?.opcion || "A").trim().toUpperCase()] ?? 0;
+  } catch (e) { if (esFatal(e)) throw e; return 0; }
+}
+
+/** Prepara una foto o página: orienta, endereza, realza y corta. */
+async function prepararPagina(src, { orientar, maxFranjas, notas }) {
+  let c = escalado(src, MAX_SIDE);
+  if (orientar) {
+    const g = await detectarGiro(c);
+    if (g) { c = girar90(c, g); notas.push({ 90: "estaba de lado (la giré a la derecha)", 180: "estaba de cabeza (la volteé)", 270: "estaba de lado (la giré a la izquierda)" }[g]); }
+  }
+  const ang = inclinacion(c);
+  if (Math.abs(ang) >= 0.5) { c = girarLibre(c, -ang); notas.push(`la enderecé ${Math.abs(ang).toFixed(1)}°`); }
+  const realzada = realzar(c);
+  const piezas = maxFranjas > 0 ? franjas(realzada, maxFranjas) : [];
+  return { color: c, piezas };
+}
+
+/* ============================================================
+   PDF
+   ============================================================ */
+async function leerPDF(file) {
+  if (!window.pdfjsLib) throw new Error("No se pudo cargar el lector de PDF. Recarga la página.");
+  let pdf;
+  try { pdf = await pdfjsLib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise; }
+  catch (e) { throw new Error(e?.name === "PasswordException" ? "El PDF tiene contraseña. Ábrelo, imprímelo como PDF sin contraseña y súbelo de nuevo." : "No se pudo abrir el PDF."); }
+  let texto = "";
+  const paginas = Math.min(pdf.numPages, 40);
+  for (let p = 1; p <= paginas; p++) {
+    const tc = await (await pdf.getPage(p)).getTextContent();
+    texto += `\n--- Página ${p} ---\n` + tc.items.map((it) => it.str + (it.hasEOL ? "\n" : " ")).join("");
+  }
+  const render = async (p) => {
+    const page = await pdf.getPage(p), vp0 = page.getViewport({ scale: 1 });
+    const scale = Math.min(3, 2000 / Math.max(vp0.width, vp0.height)), vp = page.getViewport({ scale });
+    const c = lienzo(vp.width, vp.height), x = c.getContext("2d");
+    x.fillStyle = "#fff"; x.fillRect(0, 0, c.width, c.height);
+    await page.render({ canvasContext: x, viewport: vp }).promise;
+    return c;
+  };
+  return { texto, numPages: pdf.numPages, render };
+}
+
+/* ============================================================
+   Instrucciones para Claude
+   ============================================================ */
+const INSTRUCCIONES = `Eres un capturista experto en documentos mexicanos para un analista de crédito automotriz.
+Tu trabajo: identificar qué documento(s) hay en el archivo y extraer los datos exactos.
+
+Tipos: "ine" (credencial para votar), "estado_cuenta" (estado de cuenta de banco mexicano), "solicitud" (solicitud de crédito, a veces llenada a mano), "cotizacion" (cotización de auto) u "otro".
+Un archivo puede traer varios documentos (ej. un PDF con 3 estados de cuenta, o INE y solicitud en la misma foto): devuelve uno por cada documento.
+
+Cómo leer letra difícil:
+- Lee carácter por carácter. Si recibes la foto completa y franjas realzadas, usa las franjas para el detalle y la completa para el contexto.
+- Usa el contexto: nombres y apellidos mexicanos comunes, colonias y municipios reales, dominios de correo comunes (gmail.com, hotmail.com, outlook.com, yahoo.com.mx, icloud.com, live.com.mx).
+- Confusiones típicas a mano: 1/7, 4/9, 5/S, 0/O/D, 2/Z, 6/b, 8/B, u/v, n/h, a/o, l/1/I, r/v, g/q, m/rn.
+- Si un dato aparece en varios lugares (ej. el nombre), crúzalo para confirmar.
+- En correos, el usuario suele parecerse al nombre de la persona: úsalo para desempatar.
+- NUNCA inventes. Si algo es ilegible o no aparece, pon null. Si lo leíste pero no estás seguro, ponlo y agrégalo a "dudas" con el campo y las alternativas (ej. "correo: jperez71@gmail.com o jperez77@gmail.com").
+
+Por tipo:
+- INE: nombre completo (nombre(s) y apellidos en orden natural), fecha de nacimiento, CURP, domicilio y año de vigencia (ej. "VIGENCIA 2021-2031" -> 2031). Si el domicilio no trae calle, calle_numero = null.
+- Estado de cuenta: del RESUMEN del periodo copia, tal como están impresos: saldo inicial/anterior, total de depósitos/abonos, total de retiros/cargos y saldo final. No los calcules tú. cuenta_terminacion = últimos 4 dígitos de la cuenta o CLABE. evidencia_total = copia LITERAL del renglón donde viene el total de depósitos/abonos. suma_abonos_movimientos solo si ves toda la tabla de movimientos; si no, null. periodo_fin = fecha de corte.
+  Antes de responder comprueba: saldo inicial + abonos − cargos = saldo final. Si no cuadra, vuelve a leer esos números con cuidado; si sigue sin cuadrar, deja lo que dice el documento y anótalo en "dudas".
+- Solicitud: nombre, correo, celular (10 dígitos) y domicilio.
+- Cotización: marca, modelo y versión, año (modelo del auto) y precio total del auto.
+- Fechas en formato AAAA-MM-DD. Montos como número sin $ ni comas (ej. 45230.5).
+
+Responde SOLO con JSON con esta forma exacta (en cada documento llena solo la sección de su tipo; las demás van en null):
+{"documentos":[{"tipo":"ine","legible":true,
+"ine":{"nombre_completo":null,"fecha_nacimiento":null,"curp":null,"calle_numero":null,"colonia":null,"cp":null,"municipio_estado":null,"vigencia":null},
+"estado_cuenta":{"banco":null,"titular":null,"cuenta_terminacion":null,"periodo_inicio":null,"periodo_fin":null,"saldo_inicial":null,"total_depositos_abonos":null,"total_retiros_cargos":null,"saldo_final":null,"evidencia_total":null,"suma_abonos_movimientos":null},
+"solicitud":{"nombre_completo":null,"correo":null,"telefono_celular":null,"calle_numero":null,"colonia":null,"cp":null,"municipio_estado":null},
+"cotizacion":{"marca":null,"modelo":null,"anio":null,"precio":null},
+"dudas":[]}]}`;
+
+const NUL = (t) => ({ anyOf: [{ type: t }, { type: "null" }] });
+const OBJ = (props) => ({ type: "object", additionalProperties: false, required: Object.keys(props), properties: props });
+const NOBJ = (props) => ({ anyOf: [OBJ(props), { type: "null" }] });
+const ESQUEMA = OBJ({ documentos: { type: "array", items: OBJ({
+  tipo: { type: "string", enum: ["ine", "estado_cuenta", "solicitud", "cotizacion", "otro"] },
+  legible: { type: "boolean" },
+  ine: NOBJ({ nombre_completo: NUL("string"), fecha_nacimiento: NUL("string"), curp: NUL("string"), calle_numero: NUL("string"), colonia: NUL("string"), cp: NUL("string"), municipio_estado: NUL("string"), vigencia: NUL("integer") }),
+  estado_cuenta: NOBJ({ banco: NUL("string"), titular: NUL("string"), cuenta_terminacion: NUL("string"), periodo_inicio: NUL("string"), periodo_fin: NUL("string"), saldo_inicial: NUL("number"), total_depositos_abonos: NUL("number"), total_retiros_cargos: NUL("number"), saldo_final: NUL("number"), evidencia_total: NUL("string"), suma_abonos_movimientos: NUL("number") }),
+  solicitud: NOBJ({ nombre_completo: NUL("string"), correo: NUL("string"), telefono_celular: NUL("string"), calle_numero: NUL("string"), colonia: NUL("string"), cp: NUL("string"), municipio_estado: NUL("string") }),
+  cotizacion: NOBJ({ marca: NUL("string"), modelo: NUL("string"), anio: NUL("integer"), precio: NUL("number") }),
+  dudas: { type: "array", items: { type: "string" } },
+}) } });
+const ESQUEMA_GIRO = OBJ({ opcion: { type: "string", enum: ["A", "B", "C", "D"] } });
+
+const VERIFICAR = (problemas, previo) => `${INSTRUCCIONES}
+
+SEGUNDA REVISIÓN. Otra lectura de este mismo archivo dio el JSON de abajo, pero tiene estos posibles problemas:
+${problemas.map((p) => "- " + p).join("\n")}
+
+No te fíes de esa lectura: vuelve a leer TODO desde las imágenes/texto, carácter por carácter, y devuelve tu propia extracción completa con la misma forma JSON. Si un campo sigue dudoso, déjalo en "dudas" con las alternativas.
+
+Lectura anterior:
+${JSON.stringify(previo)}`;
+
+/* ============================================================
+   Validaciones (en código, no en el modelo)
+   ============================================================ */
+const EMAIL_RE = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
+const CURP_RE = /^[A-Z]{4}\d{6}[HMX][A-Z]{5}[A-Z0-9]\d$/;
+const TYPOS = { "gmial.com": "gmail.com", "gamil.com": "gmail.com", "gmail.con": "gmail.com", "gmai.com": "gmail.com", "gmail.com.mx": "gmail.com",
+  "hotmial.com": "hotmail.com", "hotmail.con": "hotmail.com", "hotmal.com": "hotmail.com", "hotmai.com": "hotmail.com",
+  "outlok.com": "outlook.com", "outlook.con": "outlook.com", "yaho.com": "yahoo.com", "yahoo.con": "yahoo.com", "yahoo.com.mx.": "yahoo.com.mx" };
+const SECCIONES = {
+  ine: ["nombre_completo", "fecha_nacimiento", "curp", "calle_numero", "colonia", "cp", "municipio_estado", "vigencia"],
+  estado_cuenta: ["banco", "titular", "periodo_inicio", "periodo_fin", "total_depositos_abonos", "suma_abonos_movimientos", "cuenta_terminacion", "saldo_inicial", "total_retiros_cargos", "saldo_final", "evidencia_total"],
+  solicitud: ["nombre_completo", "correo", "telefono_celular", "calle_numero", "colonia", "cp", "municipio_estado"],
+  cotizacion: ["marca", "modelo", "anio", "precio"],
+};
+const CRITICOS = { ine: ["nombre_completo", "fecha_nacimiento", "curp", "calle_numero", "colonia", "cp"],
+  solicitud: ["nombre_completo", "correo", "telefono_celular", "calle_numero", "colonia", "cp"],
+  cotizacion: ["modelo", "anio", "precio"], estado_cuenta: ["total_depositos_abonos", "periodo_fin", "banco"] };
+const NUMERICOS = new Set(["total_depositos_abonos", "suma_abonos_movimientos", "precio", "anio", "vigencia", "saldo_inicial", "total_retiros_cargos", "saldo_final"]);
+
+function num(v) {
+  if (v === null || v === undefined || v === "") return null;
+  if (typeof v === "number") return isFinite(v) ? v : null;
+  const n = parseFloat(String(v).replace(/[$,\s]/g, "").replace(/MXN|M\.N\./gi, ""));
+  return isFinite(n) ? n : null;
+}
+function txt(v) { if (v === null || v === undefined) return null; const s = String(v).trim(); return s && s.toLowerCase() !== "null" ? s : null; }
+function fechaValida(s) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || ""); if (!m) return false;
+  const y = +m[1], mo = +m[2], d = +m[3], dt = new Date(Date.UTC(y, mo - 1, d));
+  return y > 1900 && y <= new Date().getFullYear() + 1 && dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === d;
+}
+function montoEnTexto(monto, texto) {
+  for (const m of (texto || "").match(/(?<![\d.,])\d{1,3}(?:[,\s]?\d{3})*\.\d{2}(?!\d)/g) || [])
+    if (Math.abs(parseFloat(m.replace(/[,\s]/g, "")) - monto) < 0.005) return true;
+  return false;
+}
+function fechaDeCurp(c) { if (!CURP_RE.test(c || "")) return null; return `${/\d/.test(c[16]) ? "19" : "20"}${c.slice(4, 6)}-${c.slice(6, 8)}-${c.slice(8, 10)}`; }
+
+/** Limpia la respuesta del modelo a la forma esperada. */
+function normalizar(raw) {
+  const lista = Array.isArray(raw?.documentos) ? raw.documentos : Array.isArray(raw) ? raw : raw?.tipo ? [raw] : [];
+  return lista.map((d) => {
+    const tipo = ["ine", "estado_cuenta", "solicitud", "cotizacion"].includes(d?.tipo) ? d.tipo : "otro";
+    const out = { tipo, legible: d?.legible !== false, dudas: Array.isArray(d?.dudas) ? d.dudas.map(String).filter(Boolean) : [] };
+    if (tipo !== "otro") {
+      const sec = d?.[tipo] || {}; out[tipo] = {};
+      for (const k of SECCIONES[tipo]) out[tipo][k] = NUMERICOS.has(k) ? num(sec[k]) : txt(sec[k]);
+      if (out[tipo].anio !== undefined && out[tipo].anio !== null) out[tipo].anio = Math.round(out[tipo].anio);
+    }
+    return out;
+  });
+}
+/** Revisa y corrige en el lugar; regresa la lista de problemas. */
+function validar(d) {
+  const p = [];
+  if (d.ine) {
+    const i = d.ine;
+    if (i.curp) {
+      i.curp = i.curp.replace(/\s/g, "").toUpperCase();
+      if (!CURP_RE.test(i.curp)) p.push(`CURP "${i.curp}" no tiene formato válido`);
+      else {
+        const fc = fechaDeCurp(i.curp);
+        if (i.fecha_nacimiento && fc !== i.fecha_nacimiento) p.push(`fecha de nacimiento ${i.fecha_nacimiento} no coincide con la CURP (${fc})`);
+        else if (!i.fecha_nacimiento) i.fecha_nacimiento = fc;
+        if (i.nombre_completo && !curpVsNombre(i.curp, i.nombre_completo)) p.push(`la CURP ${i.curp} no corresponde a las iniciales del nombre "${i.nombre_completo}"`);
+      }
+    }
+    if (i.fecha_nacimiento && !fechaValida(i.fecha_nacimiento)) p.push(`fecha de nacimiento "${i.fecha_nacimiento}" no es válida`);
+    else if (i.fecha_nacimiento) {
+      const [y, m, d] = i.fecha_nacimiento.split("-").map(Number), hoy = new Date();
+      const edad = hoy.getFullYear() - y - ((hoy.getMonth() + 1 < m || (hoy.getMonth() + 1 === m && hoy.getDate() < d)) ? 1 : 0);
+      if (edad < 18 || edad > 85) p.push(`la edad calculada (${edad} años) es poco común; revisa la fecha de nacimiento`);
+    }
+    if (i.vigencia && i.vigencia < new Date().getFullYear()) p.push(`la INE venció en ${i.vigencia}`);
+  }
+  if (d.solicitud) {
+    const s = d.solicitud;
+    if (s.correo) {
+      s.correo = s.correo.replace(/\s/g, "").toLowerCase();
+      const at = s.correo.lastIndexOf("@");
+      if (at > 0) { const dom = s.correo.slice(at + 1); if (TYPOS[dom]) { p.push(`el correo decía "${dom}"; lo cambié a ${TYPOS[dom]}`); s.correo = s.correo.slice(0, at + 1) + TYPOS[dom]; } }
+      if (!EMAIL_RE.test(s.correo)) p.push(`correo "${s.correo}" no tiene formato válido`);
+    }
+    if (s.telefono_celular) {
+      let dig = s.telefono_celular.replace(/\D/g, "");
+      if (dig.length === 12 && dig.startsWith("52")) dig = dig.slice(2);
+      if (dig.length === 13 && dig.startsWith("521")) dig = dig.slice(3);
+      s.telefono_celular = dig;
+      if (dig.length !== 10) p.push(`celular "${dig}" no tiene 10 dígitos`);
+    }
+    if (s.cp && !/^\d{5}$/.test(s.cp.trim())) p.push(`CP "${s.cp}" no tiene 5 dígitos`);
+  }
+  if (d.cotizacion) {
+    const c = d.cotizacion, y = new Date().getFullYear();
+    if (c.anio !== null && (c.anio < 2000 || c.anio > y + 2)) p.push(`año del auto ${c.anio} fuera de rango`);
+    if (c.precio !== null && (c.precio < 50000 || c.precio > 10000000)) p.push(`precio ${MXN.format(c.precio)} fuera de rango normal`);
+  }
+  if (d.estado_cuenta) {
+    const e = d.estado_cuenta;
+    if (e.periodo_fin && !fechaValida(e.periodo_fin)) p.push(`fecha de corte "${e.periodo_fin}" no es válida`);
+    if (e.total_depositos_abonos !== null && e.total_depositos_abonos < 0) p.push("el total de abonos salió negativo");
+    if (e.total_depositos_abonos === null && d.legible) p.push("no encontré el total de depósitos/abonos del resumen");
+    const [si, ab, ca, sf] = [e.saldo_inicial, e.total_depositos_abonos, e.total_retiros_cargos, e.saldo_final];
+    if ([si, ab, ca, sf].every((x) => x !== null && x !== undefined)) {
+      const calc = si + ab - ca;
+      if (Math.abs(calc - sf) > Math.max(1, 0.005 * Math.max(Math.abs(sf), 1)))
+        p.push(`los saldos no cuadran: inicial ${MXN.format(si)} + abonos ${MXN.format(ab)} − cargos ${MXN.format(ca)} = ${MXN.format(calc)}, pero el saldo final dice ${MXN.format(sf)} (error de lectura o documento alterado)`);
+    }
+    if (ab !== null && e.evidencia_total && !montoEnTexto(ab, e.evidencia_total)) p.push(`el total ${MXN.format(ab)} no coincide con el renglón citado: "${e.evidencia_total}"`);
+  }
+  return p;
+}
+
+/* ============================================================
+   Leer un archivo de principio a fin
+   ============================================================ */
+async function procesar(item) {
+  const notas = item.ajustes = [];
+  const maxImgs = S.limits?.images?.maxCount ?? 0;
+  if (!S.sample || !maxImgs) throw Object.assign(new Error("Esta vista no puede enviar imágenes a Claude."), { code: "images_unavailable" });
+  let imagenes = [], descripcion = "", textoPDF = "";
+  const terminar = (docs) => {
+    if (textoPDF) for (const d of docs) {
+      const ab = d.estado_cuenta?.total_depositos_abonos;
+      if (d.tipo === "estado_cuenta" && ab != null && !montoEnTexto(ab, textoPDF)) d.dudas.push(`el total de abonos ${MXN.format(ab)} no aparece en el texto del PDF; revísalo`);
+    }
+    item.docs = docs;
+  };
+
+  if (item.kind === "pdf") {
+    paso(item, "Abriendo PDF…");
+    const pdf = await leerPDF(item.file);
+    const util = pdf.texto.replace(/\s|---|Página \d+/g, "").length;
+    if (util > 300) {                       // PDF digital del banco: el texto es exacto
+      textoPDF = pdf.texto.slice(0, 100000);
+      const p1 = await pdf.render(1);
+      item.preview = await vistaPrevia(p1);
+      imagenes = [await aBlob(escalado(p1, MAX_SIDE))];
+      descripcion = `Es un PDF digital de ${pdf.numPages} página(s). Abajo va su texto extraído (exacto) y la imagen 1 es la página 1 para ver el formato.`;
+      notas.push(`digital, leí el texto de ${Math.min(pdf.numPages, 40)} página(s)`);
+    } else {                                // PDF escaneado: tratar cada página como foto
+      const n = Math.min(pdf.numPages, Math.max(1, maxImgs));
+      for (let p = 1; p <= n; p++) {
+        paso(item, `Enderezando página ${p} de ${n}…`);
+        const pag = await prepararPagina(await pdf.render(p), { orientar: p === 1, maxFranjas: n === 1 ? Math.min(3, maxImgs - 1) : 0, notas });
+        if (p === 1) item.preview = await vistaPrevia(pag.color);
+        imagenes.push(await aBlob(pag.color), ...(await Promise.all(pag.piezas.map((c) => aBlob(c)))));
+      }
+      imagenes = imagenes.slice(0, maxImgs);
+      descripcion = n === 1
+        ? `Es un PDF escaneado de 1 página. Imagen 1: la página completa a color, ya enderezada. Las demás: la misma página en franjas de arriba a abajo, realzadas (grises, alto contraste) para ver letra chica.`
+        : `Es un PDF escaneado; te paso sus primeras ${n} páginas en orden, ya enderezadas.` + (pdf.numPages > n ? ` (El PDF tiene ${pdf.numPages} páginas; si falta el resumen dilo en "dudas".)` : "");
+      if (pdf.numPages > n) notas.push(`solo envié las primeras ${n} de ${pdf.numPages} páginas`);
+    }
+  } else {
+    paso(item, "Revisando la foto…");
+    const img = await cargarImagen(item.file);
+    const lado = Math.max(img.naturalWidth, img.naturalHeight);
+    if (lado < 600) throw new Error("La foto es muy chica. Mándala como archivo/documento, no como miniatura o captura recortada.");
+    if (nitidez(img) < 2) throw new Error("La foto está muy borrosa. Tómala de nuevo con buena luz y sin moverte.");
+    paso(item, "Revisando orientación y enderezando…");
+    const vertical = img.naturalHeight >= img.naturalWidth;
+    const pag = await prepararPagina(img, { orientar: true, maxFranjas: Math.min(vertical ? 3 : 2, maxImgs - 1), notas });
+    item.preview = await vistaPrevia(pag.color);
+    imagenes = [await aBlob(pag.color), ...(await Promise.all(pag.piezas.map((c) => aBlob(c))))];
+    descripcion = `Es una foto. Imagen 1: el documento completo a color, ya enderezado.` +
+      (pag.piezas.length ? ` Imágenes 2 a ${pag.piezas.length + 1}: el mismo documento en franjas de arriba a abajo, realzadas (grises, alto contraste, sin sombras) para leer letra chica o tenue.` : "");
+  }
+  render();
+
+  const base = `${INSTRUCCIONES}\n\nArchivo: "${item.name}". ${descripcion}` + (textoPDF ? `\n\nTEXTO DEL PDF:\n<<<\n${textoPDF}\n>>>` : "");
+  paso(item, "Leyendo con Claude…");
+  const lectura1 = normalizar(await S.sample.json(base, { images: imagenes, modelTier: "complex", effort: "high", schema: ESQUEMA }));
+  if (!lectura1.length) throw new Error("No encontré ningún documento en el archivo.");
+  const prob1 = lectura1.map((d) => validar(d));
+  const problemas = lectura1.flatMap((d, i) => prob1[i].concat(d.dudas).map((x) => `${ETIQ[d.tipo]}: ${x}`));
+  const sinSegunda = () => { lectura1.forEach((d, i) => d.dudas = [...new Set(prob1[i].concat(d.dudas))]); terminar(lectura1); };
+  if (!problemas.length || lectura1.every((d) => d.tipo === "otro" || !d.legible)) { sinSegunda(); return; }
+
+  // Segunda lectura independiente, enfocada en lo dudoso
+  paso(item, "Verificando datos dudosos…");
+  let lectura2;
+  try {
+    const prompt = VERIFICAR(problemas, { documentos: lectura1 }) + `\n\nArchivo: "${item.name}". ${descripcion}` + (textoPDF ? `\n\nTEXTO DEL PDF:\n<<<\n${textoPDF}\n>>>` : "");
+    lectura2 = normalizar(await S.sample.json(prompt, { images: imagenes, modelTier: "complex", effort: "high", schema: ESQUEMA }));
+  } catch (e) { if (esFatal(e)) throw e; }
+  if (!lectura2?.length) { sinSegunda(); return; }
+  for (const d of lectura2) {
+    const nuevos = validar(d).concat(d.dudas);
+    const par = lectura1.filter((x) => x.tipo === d.tipo)[lectura2.filter((x) => x.tipo === d.tipo).indexOf(d)];
+    if (par && CRITICOS[d.tipo]) for (const k of CRITICOS[d.tipo]) {
+      const a = par[d.tipo]?.[k], b = d[d.tipo]?.[k];
+      if (a !== null && a !== undefined && String(a) !== String(b)) nuevos.push(`${k.replace(/_/g, " ")}: 1ª lectura "${a}", 2ª lectura "${b ?? "vacío"}" (usé la 2ª)`);
+    }
+    d.dudas = [...new Set(nuevos)];
+  }
+  terminar(lectura2);
+}
+async function vistaPrevia(c) { return URL.createObjectURL(await aBlob(escalado(c, 160), 0.7)); }
+function paso(item, t) { item.paso = t; render(); }
+
+/* ============================================================
+   Armar la ficha
+   ============================================================ */
+const sinAcentos = (s) => (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase().replace(/[^A-Z ]/g, " ").split(/\s+/).filter(Boolean);
+function mismoNombre(a, b) { const A = new Set(sinAcentos(a)), B = sinAcentos(b); if (!A.size || !B.length) return true; return B.filter((x) => A.has(x)).length >= Math.min(2, B.length); }
+function curpVsNombre(curp, nombre) {
+  const ini = new Set(sinAcentos(nombre).map((w) => w[0]));
+  return [curp[0], curp[2], curp[3]].every((c) => c === "X" || ini.has(c));
+}
+function fusionar(docs, tipo) {
+  const out = {}; let hay = false;
+  for (const d of docs) if (d.tipo === tipo && d[tipo] && d.legible) { hay = true; for (const [k, v] of Object.entries(d[tipo])) if (out[k] == null && v != null) out[k] = v; }
+  return hay ? out : null;
+}
+function armarFicha() {
+  const docs = S.files.flatMap((f) => f.docs || []);
+  const ine = fusionar(docs, "ine"), sol = fusionar(docs, "solicitud"), cot = fusionar(docs, "cotizacion");
+  const avisos = [];
+  // Estados de cuenta: sin duplicados, del más reciente al más antiguo
+  const vistos = new Set(), estados = [];
+  for (const d of docs) if (d.tipo === "estado_cuenta" && d.estado_cuenta && d.legible) {
+    const e = d.estado_cuenta, k = `${(e.banco || "").toLowerCase()}|${e.periodo_fin || ""}`;
+    if (e.periodo_fin && vistos.has(k)) continue; vistos.add(k); estados.push(e);
+  }
+  estados.sort((a, b) => (b.periodo_fin || "").localeCompare(a.periodo_fin || ""));
+  const conTotal = estados.filter((e) => e.total_depositos_abonos !== null);
+  const usados = conTotal.slice(0, 3);
+  for (const e of estados) if (e.total_depositos_abonos === null) avisos.push(`Estado de cuenta ${e.banco || ""} ${e.periodo_fin || ""}: no se leyó el total de abonos; no entra al promedio.`);
+  for (const e of usados) {
+    const s = e.suma_abonos_movimientos;
+    if (s && e.total_depositos_abonos && Math.abs(s - e.total_depositos_abonos) / e.total_depositos_abonos > 0.02)
+      avisos.push(`${e.banco || "Estado"} ${e.periodo_fin || ""}: el resumen dice ${MXN.format(e.total_depositos_abonos)} pero los movimientos suman ${MXN.format(s)}.`);
+  }
+  if (usados.length && usados.length < 3) avisos.push(`Solo hay ${usados.length} estado(s) de cuenta con total; el promedio usa esos.`);
+  if (usados.length >= 2) {
+    const meses = usados.map((e) => (e.periodo_fin || "").slice(0, 7)).filter(Boolean);
+    if (new Set(meses).size < meses.length) avisos.push("Dos estados de cuenta tienen el mismo mes de corte; revisa que no sean de cuentas distintas del mismo mes.");
+  }
+  const promedio = usados.length ? usados.reduce((s, e) => s + e.total_depositos_abonos, 0) / usados.length : null;
+
+  // Dirección: INE; si no trae calle, la de la solicitud
+  let dirSrc = null, D = null;
+  if (ine?.calle_numero) { D = ine; dirSrc = "INE"; }
+  else if (sol?.calle_numero) { D = sol; dirSrc = ine ? "Solicitud (la INE no trae calle)" : "Solicitud"; }
+  else if (ine) { D = ine; dirSrc = "INE (sin calle)"; }
+  const direccion = D ? [D.calle_numero, D.colonia, D.cp ? `CP ${D.cp}` : null, D.municipio_estado].filter(Boolean).join(", ") : null;
+
+  const nombre = ine?.nombre_completo || sol?.nombre_completo || null;
+  if (ine?.nombre_completo && sol?.nombre_completo && !mismoNombre(ine.nombre_completo, sol.nombre_completo))
+    avisos.push(`El nombre de la solicitud (${sol.nombre_completo}) no coincide con el de la INE.`);
+  for (const e of usados) if (nombre && e.titular && !mismoNombre(nombre, e.titular))
+    avisos.push(`El titular del estado de cuenta ${e.banco || ""} ${e.periodo_fin || ""} (${e.titular}) no coincide con el cliente.`);
+
+  for (const f of S.files) {
+    for (const d of f.docs || []) {
+      if (!d.legible) avisos.push(`${f.name}: ${ETIQ[d.tipo]} ilegible; pide otra foto.`);
+      for (const x of d.dudas) avisos.push(`${ETIQ[d.tipo]} · ${x}`);
+    }
+  }
+  // ---- estados de cuenta en $0 ----
+  const cero = (x) => x != null && Math.abs(x) < 0.01;
+  for (const e of estados) {
+    const cual = `${e.banco || "Estado de cuenta"} ${e.periodo_fin || ""}`.trim(), enPromedio = usados.includes(e);
+    if (cero(e.total_depositos_abonos) && cero(e.saldo_final) && (e.saldo_inicial == null || cero(e.saldo_inicial)))
+      avisos.push(`${cual}: todo está en $0 (sin depósitos y sin saldo); parece una cuenta sin uso${enPromedio ? ". Cuenta como $0 en el promedio" : ""}.`);
+    else {
+      if (cero(e.total_depositos_abonos)) avisos.push(`${cual}: no tiene depósitos/abonos en el periodo ($0)${enPromedio ? "; cuenta como $0 en el promedio" : ""}.`);
+      if (cero(e.saldo_final)) avisos.push(`${cual}: termina el periodo con saldo $0.`);
+    }
+  }
+  if (usados.length && usados.every((e) => cero(e.total_depositos_abonos))) avisos.push("Ningún estado de cuenta usado tiene depósitos: el promedio de abonos es $0.");
+  // ---- verificaciones cruzadas: lo que se confirma va a "verificados", lo que no cuadra a "avisos" ----
+  const verificados = [];
+  const cerca = (a, b) => Math.abs(a - b) <= Math.max(1, 0.005 * Math.max(Math.abs(b), 1));
+  const cuadra = (e) => [e.saldo_inicial, e.total_depositos_abonos, e.total_retiros_cargos, e.saldo_final].every((x) => x != null)
+    ? cerca(e.saldo_inicial + e.total_depositos_abonos - e.total_retiros_cargos, e.saldo_final) : null;
+  const conSaldos = usados.filter((e) => cuadra(e) !== null);
+  if (conSaldos.length && conSaldos.every((e) => cuadra(e)))
+    verificados.push(conSaldos.length === usados.length ? (usados.length === 1 ? "Los saldos del estado de cuenta cuadran (inicial + abonos − cargos = final)." : `Los saldos cuadran en los ${usados.length} estados de cuenta (inicial + abonos − cargos = final).`)
+      : `Los saldos cuadran en ${conSaldos.length} de los ${usados.length} estados de cuenta.`);
+  const grupos = {};
+  for (const e of estados) if (e.periodo_fin) (grupos[`${(e.banco || "").toLowerCase()}|${e.cuenta_terminacion || ""}`] ||= []).push(e);
+  let pares = 0, rotos = 0;
+  for (const g of Object.values(grupos)) {
+    g.sort((a, b) => a.periodo_fin.localeCompare(b.periodo_fin));
+    for (let i = 1; i < g.length; i++) {
+      const a = g[i - 1], b = g[i];
+      if (a.saldo_final == null || b.saldo_inicial == null) continue;
+      pares++;
+      if (!cerca(a.saldo_final, b.saldo_inicial)) { rotos++;
+        avisos.push(`${b.banco || "Estado de cuenta"}: el saldo final de ${a.periodo_fin} (${MXN.format(a.saldo_final)}) no es igual al saldo inicial de ${b.periodo_fin} (${MXN.format(b.saldo_inicial)}). Puede faltar un estado de cuenta, ser de otra cuenta o estar alterado.`); }
+    }
+  }
+  if (pares && !rotos) verificados.push(`Los saldos se encadenan de un mes al siguiente (${pares} ${pares === 1 ? "cambio de mes revisado" : "cambios de mes revisados"}).`);
+  const mesN = (f) => { const m = /^(\d{4})-(\d{2})/.exec(f || ""); return m ? +m[1] * 12 + +m[2] : null; };
+  if (usados.length >= 2) {
+    const ms = usados.map((e) => mesN(e.periodo_fin)).filter((x) => x != null);
+    if (ms.slice(1).some((m, i) => ms[i] - m > 1)) avisos.push("Los estados de cuenta usados no son de meses seguidos; falta al menos un mes.");
+    else if (ms.length === usados.length && new Set(ms).size === ms.length) verificados.push(`Son ${usados.length} meses seguidos.`);
+  }
+  if (usados[0]?.periodo_fin) {
+    const dias = (Date.now() - Date.parse(usados[0].periodo_fin + "T00:00:00")) / 86400000;
+    if (dias > 60) avisos.push(`El estado de cuenta más reciente corta el ${usados[0].periodo_fin}: tiene más de 2 meses.`);
+    else if (dias >= 0) verificados.push("El estado de cuenta más reciente tiene menos de 2 meses.");
+  }
+  if (nombre && usados.some((e) => e.titular) && usados.every((e) => !e.titular || mismoNombre(nombre, e.titular)))
+    verificados.push("El titular de los estados de cuenta coincide con el cliente.");
+  if (ine?.nombre_completo && sol?.nombre_completo && mismoNombre(ine.nombre_completo, sol.nombre_completo))
+    verificados.push("El nombre de la solicitud coincide con la INE.");
+  if (ine?.curp && ine.fecha_nacimiento && fechaDeCurp(ine.curp) === ine.fecha_nacimiento && (!ine.nombre_completo || curpVsNombre(ine.curp, ine.nombre_completo)))
+    verificados.push(ine.nombre_completo ? "La CURP coincide con la fecha de nacimiento y el nombre." : "La CURP coincide con la fecha de nacimiento.");
+  if (ine?.vigencia && ine.vigencia >= new Date().getFullYear()) verificados.push(`La INE está vigente (hasta ${ine.vigencia}).`);
+  if (ine?.cp && sol?.cp) {
+    if (ine.cp.trim() !== sol.cp.trim()) avisos.push(`El CP de la solicitud (${sol.cp}) es distinto al de la INE (${ine.cp}); el cliente pudo cambiar de domicilio.`);
+    else verificados.push("El código postal de la solicitud coincide con la INE.");
+  }
+  return {
+    campos: {
+      nombre: { v: nombre, src: ine?.nombre_completo ? "INE" : sol?.nombre_completo ? "Solicitud" : null },
+      fecha_nacimiento: { v: ine?.fecha_nacimiento || null, src: ine?.fecha_nacimiento ? "INE" : null },
+      direccion: { v: direccion, src: dirSrc },
+      correo: { v: sol?.correo || null, src: sol?.correo ? "Solicitud" : null },
+      celular: { v: sol?.telefono_celular || null, src: sol?.telefono_celular ? "Solicitud" : null },
+      promedio_abonos: { v: promedio === null ? null : MXN.format(promedio), src: usados.length ? `Promedio de ${usados.length} estado(s) de cuenta` : null },
+      auto_modelo: { v: cot ? [cot.marca, cot.modelo].filter(Boolean).join(" ") || null : null, src: cot ? "Cotización" : null },
+      auto_anio: { v: cot?.anio != null ? String(cot.anio) : null, src: cot?.anio != null ? "Cotización" : null },
+      auto_precio: { v: cot?.precio != null ? MXN.format(cot.precio) : null, src: cot?.precio != null ? "Cotización" : null },
+    },
+    estados, usados, promedio, avisos: [...new Set(avisos)], verificados,
+    tiene: { ine: !!ine, solicitud: !!sol, cotizacion: !!cot, estados: conTotal.length },
+  };
+}
+const ETQ_CAMPOS = { nombre: "Nombre completo", fecha_nacimiento: "Fecha de nacimiento", direccion: "Dirección", correo: "Correo", celular: "Celular",
+  promedio_abonos: "Promedio de abonos", auto_modelo: "Auto (marca y modelo)", auto_anio: "Año del auto", auto_precio: "Precio del auto" };
+const valor = (ficha, k) => S.overrides[k] ?? ficha.campos[k].v ?? "";
+
+/* ============================================================
+   Interfaz
+   ============================================================ */
+function render() {
+  const ficha = armarFicha();
+  // Checklist
+  const req = [["INE", ficha.tiene.ine], ["Solicitud", ficha.tiene.solicitud], ["Cotización", ficha.tiene.cotizacion],
+    [`Estados de cuenta ${Math.min(3, ficha.tiene.estados)}/3`, ficha.tiene.estados >= 3]];
+  $("checklist").replaceChildren(...req.map(([t, ok]) => el("li", { className: ok ? "ok" : "" }, t)));
+
+  // Archivos
+  const pend = S.files.filter((f) => f.status === "pendiente").length;
+  const corriendo = S.files.some((f) => f.status === "procesando");
+  $("procesar").disabled = !pend || corriendo || S.bloqueado;
+  $("procesar").textContent = corriendo ? "Leyendo…" : pend ? `Leer ${pend} documento${pend > 1 ? "s" : ""}` : "Leer documentos";
+  $("files-empty").hidden = S.files.length > 0;
+  $("drop-t").textContent = S.files.length ? "Agregar más documentos" : "Arrastra aquí todos los documentos del cliente";
+  $("procesar").hidden = !pend;
+  $("files").replaceChildren(...S.files.map(filaArchivo));
+
+  // Ficha
+  $("badge-ejemplo").hidden = !S.ejemplo;
+  $("fields").replaceChildren(...Object.keys(ETQ_CAMPOS).map((k) => filaCampo(ficha, k)));
+  // Estados
+  if (!ficha.estados.length) $("estados").replaceChildren(el("p", { className: "empty" }, "Sin estados de cuenta todavía."));
+  else {
+    const usados = new Set(ficha.usados);
+    const t = el("table", {},
+      el("thead", {}, el("tr", {}, el("th", {}, "Banco"), el("th", {}, "Corte"), el("th", { className: "num" }, "Depósitos / abonos"))),
+      el("tbody", {}, ...ficha.estados.map((e) => el("tr", { className: usados.has(e) ? "" : "unused", title: usados.has(e) ? "" : "No entra al promedio" },
+        el("td", {}, e.banco || "—"), el("td", {}, e.periodo_fin || "—"),
+        el("td", { className: "num" + (e.total_depositos_abonos !== null && Math.abs(e.total_depositos_abonos) < 0.01 ? " cero" : "") }, e.total_depositos_abonos === null ? "no legible" : MXN.format(e.total_depositos_abonos))))),
+      ficha.promedio === null ? "" : el("tfoot", {}, el("tr", {}, el("td", { colSpan: 2 }, `Promedio (${ficha.usados.length})`), el("td", { className: "num" }, MXN.format(ficha.promedio)))));
+    $("estados").replaceChildren(t);
+  }
+  $("verificados").hidden = !ficha.verificados.length;
+  $("verificados").replaceChildren(...ficha.verificados.map((a) => el("li", {}, a)));
+  $("avisos").hidden = !ficha.avisos.length;
+  $("avisos").replaceChildren(...ficha.avisos.map((a) => el("li", {}, a)));
+}
+function filaArchivo(f) {
+  const thumb = el("div", { className: "thumb" }, f.preview ? el("img", { src: f.preview, alt: "" }) : f.kind === "pdf" ? "PDF" : "IMG");
+  const estado = f.status === "pendiente" ? el("span", { className: "stamp wait" }, "Pendiente")
+    : f.status === "procesando" ? el("span", { className: "stamp run" }, f.paso || "Procesando…")
+    : f.status === "error" ? el("span", { className: "stamp err" }, "No se leyó")
+    : null;
+  const tipos = (f.docs || []).map((d) => el("span", { className: "stamp doc" }, d.legible ? ETIQ[d.tipo] : ETIQ[d.tipo] + " · ilegible"));
+  const notas = el("ul", { className: "notes" },
+    ...(f.ajustes || []).map((a) => el("li", {}, (f.kind === "pdf" ? "PDF: " : "Foto: ") + a)),
+    ...(f.docs || []).flatMap((d) => d.dudas.map((x) => el("li", { className: "duda" }, x))),
+    ...(f.error ? [el("li", { className: "err" }, f.error)] : []));
+  const acciones = el("div", { className: "actions" });
+  if (f.status === "error" && f.file && !S.bloqueado) acciones.append(el("button", { className: "btn small", type: "button", onclick: () => { f.status = "pendiente"; f.error = null; render(); correr(); } }, "Reintentar"));
+  return el("li", { className: "file" }, thumb,
+    el("div", { style: "min-width:0" }, el("div", { className: "fname" }, f.name), el("div", { className: "fmeta" }, ...(estado ? [estado] : []), ...tipos), notas, acciones),
+    el("button", { className: "x", type: "button", title: "Quitar archivo", "aria-label": `Quitar ${f.name}`, disabled: f.status === "procesando",
+      onclick: () => { S.files = S.files.filter((x) => x !== f); if (f.preview) URL.revokeObjectURL(f.preview); render(); } }, "×"));
+}
+function filaCampo(ficha, k) {
+  const c = ficha.campos[k], editado = S.overrides[k] !== undefined;
+  const input = k === "direccion"
+    ? el("textarea", { id: "f-" + k, rows: 2, value: valor(ficha, k), placeholder: "no proporcionado" })
+    : el("input", { id: "f-" + k, type: "text", value: valor(ficha, k), placeholder: "no proporcionado", autocomplete: "off" });
+  input.addEventListener("change", () => {
+    const v = input.value.trim();
+    if (v === (c.v ?? "")) delete S.overrides[k]; else S.overrides[k] = v;
+    render();
+  });
+  const src = el("div", { className: "src" + (editado ? " edit" : "") }, editado ? "Corregido a mano" : c.src ? "Fuente: " + c.src : "");
+  return el("div", { className: "field" + (k === "promedio_abonos" ? " big" : "") },
+    el("label", { htmlFor: "f-" + k }, ETQ_CAMPOS[k]), input,
+    el("button", { className: "copy", type: "button", "aria-label": `Copiar ${ETQ_CAMPOS[k]}`, onclick: () => copiar(input.value, ETQ_CAMPOS[k]) }, "Copiar"), src);
+}
+function el(tag, props = {}, ...hijos) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else if (k in e && k !== "style") e[k] = v; else e.setAttribute(k, v);
+  }
+  for (const h of hijos) if (h !== "" && h != null) e.append(h);
+  return e;
+}
+function aviso(t) { const n = $("toast"); n.textContent = t; n.hidden = false; clearTimeout(aviso.t); aviso.t = setTimeout(() => n.hidden = true, 2200); }
+async function copiar(texto, que) {
+  if (!texto) { aviso("No hay nada que copiar"); return; }
+  try { await navigator.clipboard.writeText(texto); aviso(`${que} copiado`); }
+  catch { const t = el("textarea", { value: texto, style: "position:fixed;opacity:0" }); document.body.append(t); t.select(); try { document.execCommand("copy"); aviso(`${que} copiado`); } catch { aviso("Selecciona el texto y cópialo a mano"); } t.remove(); }
+}
+function textoFicha() {
+  const f = armarFicha();
+  const lineas = Object.keys(ETQ_CAMPOS).map((k) => `${ETQ_CAMPOS[k]}: ${valor(f, k) || "no proporcionado"}`);
+  if (f.usados.length) lineas.push("", "Estados de cuenta usados:", ...f.usados.map((e) => `  ${e.banco || "—"} ${e.periodo_fin || ""}: ${MXN.format(e.total_depositos_abonos)}`));
+  if (f.avisos.length) lineas.push("", "Revisar:", ...f.avisos.map((a) => "  - " + a));
+  return lineas.join("\n");
+}
+
+/* ============================================================
+   Cola de proceso y errores
+   ============================================================ */
+function esFatal(e) { return ["not_granted", "sampling_disabled", "not_declared", "capability_disabled", "capability_removed", "images_unavailable", "session_expired"].includes(e?.code); }
+function mensajeError(e) {
+  switch (e?.code) {
+    case "rate_limited": return "Demasiadas lecturas seguidas para tu cuenta de API. Espera un minuto y toca Reintentar.";
+    case "image_rejected": return "La imagen no se pudo enviar (formato o tamaño). Prueba con otra foto.";
+    case "refused": return "Claude no procesó este archivo. Prueba con otra foto del documento.";
+    case "invalid_json": case "empty_completion": return "La respuesta salió incompleta. Toca Reintentar.";
+    case "prompt_too_large": return "El archivo es demasiado grande. Sube solo las páginas necesarias.";
+    case "upstream_error": return "Se cortó la conexión con la IA o está saturada. Toca Reintentar.";
+    case "clave": case "saldo": case "api": return e.message;
+    default: return e?.message && !e.code ? e.message : "No se pudo leer este archivo. Toca Reintentar.";
+  }
+}
+function bloquear(e) {
+  S.bloqueado = true;
+  const m = { not_granted: "Esta página necesita permiso para usar Claude y leer los documentos. Recarga la página y acepta el aviso para continuar.",
+    session_expired: "Tu sesión de Claude expiró. Vuelve a iniciar sesión y recarga la página.",
+    images_unavailable: "Esta vista no puede enviar imágenes a Claude. Abre la página en claude.ai desde un navegador o la app de escritorio." }[e?.code]
+    || "Claude no está disponible para esta cuenta en esta página. Ábrela en claude.ai con tu sesión iniciada.";
+  $("banner").textContent = m; $("banner").hidden = false;
+}
+let activos = 0;
+function correr() {
+  if (!S.clave) { if (S.files.some((f) => f.status === "pendiente")) abrirConfig("Pega tu clave de API para empezar a leer."); render(); return; }
+  while (activos < 2 && !S.bloqueado) {
+    const f = S.files.find((x) => x.status === "pendiente"); if (!f) break;
+    f.status = "procesando"; f.error = null; f.docs = null; activos++; render();
+    procesar(f).then(() => { f.status = "listo"; f.paso = null; })
+      .catch((e) => {
+        f.status = "error"; f.paso = null; f.error = mensajeError(e);
+        if (e?.code === "clave" || e?.code === "saldo") abrirConfig(e.message);
+        if (esFatal(e)) { bloquear(e); S.files.forEach((x) => { if (x.status === "pendiente") x.status = "error", x.error = "No se procesó."; }); }
+      })
+      .finally(() => { activos--; render(); correr(); });
+  }
+  render();
+}
+function agregar(lista) {
+  if (S.ejemplo) limpiar();
+  const ok = /^(image\/(jpeg|png|webp)|application\/pdf)$/;
+  for (const file of lista) {
+    if (!ok.test(file.type)) { aviso(`${file.name}: usa JPG, PNG o PDF`); continue; }
+    S.files.push({ id: nextId++, file, name: file.name, kind: file.type === "application/pdf" ? "pdf" : "img", status: "pendiente", docs: null, ajustes: [] });
+  }
+  correr();   // se empiezan a leer solos
+}
+function limpiar() { S.files.forEach((f) => f.preview && URL.revokeObjectURL(f.preview)); S.files = []; S.overrides = {}; S.ejemplo = false; }
+
+/* ============================================================
+   Ejemplo (datos inventados, marcados como ejemplo)
+   ============================================================ */
+function cargarEjemplo() {
+  limpiar(); S.ejemplo = true;
+  const E = (tipo, sec, dudas = []) => ({ tipo, legible: true, [tipo]: sec, dudas });
+  S.files = [
+    { id: nextId++, name: "ine_frente.jpg", kind: "img", status: "listo", ajustes: ["estaba de lado (la giré a la derecha)", "la enderecé 2.4°"],
+      docs: [E("ine", { nombre_completo: "MARÍA GUADALUPE HERNÁNDEZ RUIZ", fecha_nacimiento: "1988-07-14", curp: "HERG880714MDFRZD05", calle_numero: null, colonia: "COL. SANTA MARTHA", cp: "09510", municipio_estado: "IZTAPALAPA, CDMX", vigencia: 2031 })] },
+    { id: nextId++, name: "solicitud.jpg", kind: "img", status: "listo", ajustes: ["la enderecé 3.1°"],
+      docs: [E("solicitud", { nombre_completo: "María Guadalupe Hernández Ruiz", correo: "lupita.hdz88@gmail.com", telefono_celular: "5523418876", calle_numero: "Calle Ermita 214 int. 3", colonia: "Santa Martha", cp: "09510", municipio_estado: "Iztapalapa, CDMX" },
+        ["el correo decía \"gmial.com\"; lo cambié a gmail.com", "celular: 5523418876 o 5523418816"])] },
+    { id: nextId++, name: "cotizacion_versa.pdf", kind: "pdf", status: "listo", ajustes: ["digital, leí el texto de 1 página(s)"],
+      docs: [E("cotizacion", { marca: "Nissan", modelo: "Versa Advance CVT", anio: 2026, precio: 359900 })] },
+    { id: nextId++, name: "estados_bbva.pdf", kind: "pdf", status: "listo", ajustes: ["digital, leí el texto de 18 página(s)"],
+      docs: [E("estado_cuenta", { banco: "BBVA", titular: "MARIA GUADALUPE HERNANDEZ RUIZ", periodo_inicio: "2026-10-01", periodo_fin: "2026-10-31", total_depositos_abonos: 31250.4, suma_abonos_movimientos: 31250.4, saldo_inicial: 17024.65, total_retiros_cargos: 29875.05, saldo_final: 18400, cuenta_terminacion: "4821" }),
+             E("estado_cuenta", { banco: "BBVA", titular: "MARIA GUADALUPE HERNANDEZ RUIZ", periodo_inicio: "2026-09-01", periodo_fin: "2026-09-30", total_depositos_abonos: 28900, suma_abonos_movimientos: null, saldo_inicial: 15375.15, total_retiros_cargos: 27250.5, saldo_final: 17024.65, cuenta_terminacion: "4821" }),
+             E("estado_cuenta", { banco: "BBVA", titular: "MARIA GUADALUPE HERNANDEZ RUIZ", periodo_inicio: "2026-08-01", periodo_fin: "2026-08-31", total_depositos_abonos: 33475.15, suma_abonos_movimientos: null, saldo_inicial: 12000, total_retiros_cargos: 30100, saldo_final: 15375.15, cuenta_terminacion: "4821" }),
+             E("estado_cuenta", { banco: "BBVA", titular: "MARIA GUADALUPE HERNANDEZ RUIZ", periodo_inicio: "2026-07-01", periodo_fin: "2026-07-31", total_depositos_abonos: 25010, suma_abonos_movimientos: null, saldo_inicial: 9800, total_retiros_cargos: 22810, saldo_final: 12000, cuenta_terminacion: "4821" })] },
+  ];
+  render();
+}
+
+/* ============================================================
+   Arranque
+   ============================================================ */
+const drop = $("drop");
+$("file").addEventListener("change", (e) => { agregar([...e.target.files]); e.target.value = ""; });
+["dragenter", "dragover"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop", (e) => agregar([...(e.dataTransfer?.files || [])]));
+document.addEventListener("paste", (e) => { const fs = [...(e.clipboardData?.files || [])]; if (fs.length) agregar(fs); });
+$("procesar").addEventListener("click", correr);
+$("nuevo").addEventListener("click", () => { if (S.files.some((f) => f.status === "procesando")) { aviso("Espera a que termine de leer"); return; } limpiar(); render(); aviso("Expediente nuevo"); });
+$("ejemplo").addEventListener("click", () => { if (S.files.some((f) => f.status === "procesando")) return; cargarEjemplo(); });
+$("copiar").addEventListener("click", () => copiar(textoFicha(), "Ficha"));
+$("csv").addEventListener("click", async () => {
+  const f = armarFicha(), keys = Object.keys(ETQ_CAMPOS);
+  const q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const csv = "﻿" + keys.map((k) => q(ETQ_CAMPOS[k])).join(",") + "\n" + keys.map((k) => q(valor(f, k))).join(",") + "\n";
+  const nombre = (valor(f, "nombre") || "expediente").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^A-Za-z0-9]+/g, "_").slice(0, 40);
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  const a = el("a", { href: url, download: `ficha_${nombre}.csv` }); document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
+render();
+
+/* ---------- Conexión directa con la API de Anthropic ---------- */
+const PRECIOS = { "claude-opus-5-5": [4, 20], "claude-sonnet-5-5": [2, 10], "claude-haiku-5-5": [0.1, 0.5] };   // USD por millón de tokens
+S.gasto = 0; S.sinFormato = false;
+function errorApi(code, message) { return Object.assign(new Error(message), { code }); }
+const aBase64 = (b) => new Promise((ok, mal) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(",")[1]); r.onerror = mal; r.readAsDataURL(b); });
+function leerJSON(t) {
+  try { return JSON.parse(t); } catch {}
+  const m = /```(?:json)?\s*([\s\S]*?)```/.exec(t); if (m) try { return JSON.parse(m[1]); } catch {}
+  const a = t.indexOf("{"), b = t.lastIndexOf("}"); if (a >= 0 && b > a) try { return JSON.parse(t.slice(a, b + 1)); } catch {}
+  throw errorApi("invalid_json", "La respuesta no fue JSON");
+}
+async function llamarClaude(prompt, { images = [], modelTier, effort, schema } = {}) {
+  const model = modelTier === "quick" ? "claude-haiku-5-5" : S.modelo;
+  const content = [];
+  for (const b of [].concat(images)) content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: await aBase64(b) } });
+  content.push({ type: "text", text: prompt });
+  const body = { model, max_tokens: 16000, messages: [{ role: "user", content }], output_config: { effort: effort || (modelTier === "quick" ? "low" : "high") } };
+  if (schema && !S.sinFormato) body.output_config.format = { type: "json_schema", schema };
+  let r;
+  try {
+    r = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", body: JSON.stringify(body), headers: {
+      "content-type": "application/json", "x-api-key": S.clave, "anthropic-version": "2026-10-21",
+      "anthropic-dangerous-direct-browser-access": "true" } });
+  } catch { throw errorApi("upstream_error", "Sin conexión con la API"); }
+  let j = null; try { j = await r.json(); } catch {}
+  if (!r.ok) {
+    const msg = j?.error?.message || "";
+    if (r.status === 400 && schema && !S.sinFormato && /output_config|format|schema/i.test(msg)) { S.sinFormato = true; return llamarClaude(prompt, { images, modelTier, effort, schema }); }
+    if (r.status === 401 || r.status === 403) throw errorApi("clave", "La clave de API no es válida o no tiene permiso. Revísala en Configuración.");
+    if (/credit balance/i.test(msg)) throw errorApi("saldo", "Tu cuenta de API no tiene saldo. Recarga en console.anthropic.com → Billing.");
+    if (r.status === 429) throw errorApi("rate_limited", msg);
+    if (r.status === 413) throw errorApi("prompt_too_large", msg);
+    if (r.status >= 500) throw errorApi("upstream_error", msg);
+    throw errorApi("api", "La API rechazó la solicitud: " + (msg || `error ${r.status}`));
+  }
+  const precio = PRECIOS[model] || [0, 0], u = j.usage || {};
+  S.gasto += ((u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) * 1.25 + (u.cache_read_input_tokens || 0) * 0.1) * precio[0] / 1e6 + (u.output_tokens || 0) * precio[1] / 1e6;
+  $("gasto").textContent = `Gasto de esta sesión: $${S.gasto.toFixed(2)} USD`;
+  if (j.stop_reason === "refusal") throw errorApi("refused", "");
+  if (j.stop_reason === "max_tokens") throw errorApi("invalid_json", "La respuesta salió cortada");
+  return leerJSON((j.content || []).filter((b) => b.type === "text").map((b) => b.text).join(""));
+}
+S.sample = { json: (prompt, opts) => llamarClaude(prompt, opts) };
+S.limits = { images: { maxCount: 20 } };
+
+/* ---------- Configuración (clave guardada solo en este navegador) ---------- */
+function leerConfig() {
+  try { S.clave = localStorage.getItem("cx_clave") || ""; S.modelo = localStorage.getItem("cx_modelo") || "claude-opus-5-5"; }
+  catch { S.clave = S.clave || ""; S.modelo = S.modelo || "claude-opus-5-5"; }
+}
+function abrirConfig(msg) {
+  $("config").hidden = false; $("c-clave").value = S.clave || ""; $("c-modelo").value = S.modelo;
+  if (msg) { $("banner").textContent = msg; $("banner").hidden = false; }
+  $("c-clave").focus();
+}
+$("configurar").addEventListener("click", () => abrirConfig());
+$("c-cerrar").addEventListener("click", () => { $("config").hidden = true; });
+$("c-guardar").addEventListener("click", () => {
+  const clave = $("c-clave").value.trim();
+  if (!/^sk-ant-/.test(clave)) { $("banner").textContent = "La clave debe empezar con sk-ant-. Cópiala completa de console.anthropic.com."; $("banner").hidden = false; return; }
+  S.clave = clave; S.modelo = $("c-modelo").value;
+  try { localStorage.setItem("cx_clave", S.clave); localStorage.setItem("cx_modelo", S.modelo); } catch {}
+  $("config").hidden = true; $("banner").hidden = true; aviso("Configuración guardada");
+  S.files.forEach((f) => { if (f.status === "error" && f.file) { f.status = "pendiente"; f.error = null; } });
+  correr();
+});
+$("c-borrar").addEventListener("click", () => {
+  try { localStorage.removeItem("cx_clave"); } catch {}
+  S.clave = ""; $("c-clave").value = ""; aviso("Clave borrada de este navegador");
+});
+leerConfig();
+if (!S.clave) abrirConfig("Para empezar, pega tu clave de API de Anthropic. Mientras tanto puedes tocar «Ver ejemplo».");
+render();
+</script>
+
+</body>
+</html>
