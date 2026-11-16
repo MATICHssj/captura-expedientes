@@ -117,6 +117,12 @@ def validar(d: DocExtraction) -> list[str]:
             p.append(f"año del auto '{c.anio}' fuera de rango")
         if c.precio is not None and not (50_000 <= c.precio <= 10_000_000):
             p.append(f"precio ${c.precio:,.0f} fuera de rango normal")
+    if d.comprobante_domicilio:
+        c = d.comprobante_domicilio
+        if c.cp and not re.fullmatch(r"\d{5}", c.cp.strip()):
+            p.append(f"CP del comprobante '{c.cp}' no tiene 5 dígitos")
+        if c.fecha_emision and not _fecha_ok(c.fecha_emision):
+            p.append(f"fecha del comprobante '{c.fecha_emision}' no es válida")
     if d.estado_cuenta:
         e = d.estado_cuenta
         if e.periodo_fin and not _fecha_ok(e.periodo_fin):

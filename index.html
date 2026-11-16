@@ -107,6 +107,8 @@ label.drop input { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .notes { margin: 6px 0 0; padding: 0; list-style: none; font-size: .84rem; color: var(--muted); display: flex; flex-direction: column; gap: 2px; }
 .notes li.duda { color: var(--warn); }
 .notes li.err { color: var(--bad); }
+.detalle summary { cursor: pointer; font-size: .8rem; color: var(--muted); margin-top: 6px; }
+.detalle pre { font-family: var(--f-data); font-size: .74rem; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px; margin: 6px 0 0; max-height: 260px; overflow: auto; }
 .x { border: 0; background: none; color: var(--muted); font-size: 1.2rem; line-height: 1; padding: 2px 6px; border-radius: 6px; }
 .x:hover { color: var(--bad); background: var(--bad-soft); }
 
@@ -159,7 +161,7 @@ footer { color: var(--muted); font-size: .82rem; max-width: 80ch; }
     <div>
       <div class="eyebrow">Crédito automotriz · captura</div>
       <h1>Captura de Expedientes</h1>
-      <p>Arrastra la INE, la solicitud, la cotización y los estados de cuenta. La página endereza las fotos, las lee con Claude y arma la ficha con el promedio de abonos.</p>
+      <p>Arrastra la INE, la solicitud, la cotización, el comprobante de domicilio y los estados de cuenta. La página endereza las fotos, las lee con Claude y arma la ficha con el promedio de abonos.</p>
     </div>
     <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
       <div class="actions">
@@ -200,7 +202,7 @@ footer { color: var(--muted); font-size: .82rem; max-width: 80ch; }
       <label class="drop" id="drop">
         <input id="file" type="file" multiple accept="image/jpeg,image/png,image/webp,application/pdf">
         <strong id="drop-t">Arrastra aquí todos los documentos del cliente</strong>
-        <span>INE, solicitud, cotización y estados de cuenta, juntos o por partes · o toca para elegir varios · JPG, PNG o PDF</span>
+        <span>INE, solicitud, cotización, comprobante de domicilio y estados de cuenta, juntos o por partes · o toca para elegir varios · JPG, PNG o PDF</span>
       </label>
       <ul class="checklist" id="checklist" aria-label="Documentos requeridos"></ul>
       <button class="btn primary" id="procesar" type="button" disabled>Leer documentos</button>
@@ -240,7 +242,7 @@ const S = { files: [], overrides: {}, ejemplo: false, sample: null, limits: null
 let nextId = 1;
 const $ = (id) => document.getElementById(id);
 const MXN = new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" });
-const ETIQ = { ine: "INE", estado_cuenta: "Estado de cuenta", solicitud: "Solicitud", cotizacion: "Cotización", otro: "No reconocido" };
+const ETIQ = { ine: "INE", estado_cuenta: "Estado de cuenta", solicitud: "Solicitud", cotizacion: "Cotización", comprobante_domicilio: "Comprobante de domicilio", otro: "No reconocido" };
 
 if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
@@ -436,7 +438,16 @@ async function leerPDF(file) {
 const INSTRUCCIONES = `Eres un capturista experto en documentos mexicanos para un analista de crédito automotriz.
 Tu trabajo: identificar qué documento(s) hay en el archivo y extraer los datos exactos.
 
-Tipos: "ine" (credencial para votar), "estado_cuenta" (estado de cuenta de banco mexicano), "solicitud" (solicitud de crédito, a veces llenada a mano), "cotizacion" (cotización de auto) u "otro".
+Tipos: "ine", "estado_cuenta", "solicitud", "cotizacion", "comprobante_domicilio" u "otro".
+Cómo reconocer cada tipo:
+- "ine": credencial para votar del INE (o la antigua del IFE). Dice "INSTITUTO NACIONAL ELECTORAL" o "INSTITUTO FEDERAL ELECTORAL" y "CREDENCIAL PARA VOTAR"; trae foto, NOMBRE, DOMICILIO, CLAVE DE ELECTOR, CURP, FECHA DE NACIMIENTO y VIGENCIA. El REVERSO (código QR o de barras, huella, firma, renglones que empiezan con "IDMEX") también es "ine" aunque no traiga nombre. En la credencial el nombre viene en renglones: apellido paterno, apellido materno y nombre(s); escríbelo como "NOMBRE(S) APELLIDO_PATERNO APELLIDO_MATERNO". Un pasaporte o una licencia de manejo NO es "ine": es "otro".
+- "solicitud": formato de solicitud de crédito automotriz de una financiera, banco o agencia (NR Finance, Crédito Nissan, GM Financial, Toyota Financial, VW Financial, Ford Credit, Santander, BBVA, Banorte, Scotiabank, cajas, etc.) con datos personales, domicilio, empleo e ingresos, referencias; muchas veces llenada a mano.
+- "cotizacion": cotización o corrida financiera de un auto: marca, modelo/versión, año modelo, precio, enganche, plazo, mensualidad.
+- "estado_cuenta": estado de cuenta BANCARIO (BBVA, Santander, Banorte, Banamex, HSBC, Scotiabank, Inbursa, Azteca, BanCoppel, Nu, Hey Banco, Mercado Pago, etc.) con periodo, saldos y movimientos.
+- "comprobante_domicilio": recibo de luz (CFE), agua, teléfono/internet/cable (Telmex, Izzi, Totalplay, Megacable, AT&T, Telcel), gas, predial o constancia de domicilio. Lo importante: titular, domicilio y fecha de emisión (si no hay, la fecha límite de pago o del periodo facturado).
+- "otro": cualquier otra cosa (recibo de nómina, pasaporte, licencia, carta, captura de pantalla…).
+En TODOS los documentos llena "descripcion" con una frase corta de qué es (ej. "INE frente", "INE reverso", "Recibo CFE bimestral", "Estado de cuenta BBVA octubre 2026").
+Si un documento trae el nombre de una persona, NO lo dejes en null: en la INE y la solicitud va en nombre_completo, en el estado de cuenta y el comprobante en titular, y en la cotización en cliente_nombre.
 Un archivo puede traer varios documentos (ej. un PDF con 3 estados de cuenta, o INE y solicitud en la misma foto): devuelve uno por cada documento.
 
 Cómo leer letra difícil:
@@ -452,27 +463,31 @@ Por tipo:
 - Estado de cuenta: del RESUMEN del periodo copia, tal como están impresos: saldo inicial/anterior, total de depósitos/abonos, total de retiros/cargos y saldo final. No los calcules tú. cuenta_terminacion = últimos 4 dígitos de la cuenta o CLABE. evidencia_total = copia LITERAL del renglón donde viene el total de depósitos/abonos. suma_abonos_movimientos solo si ves toda la tabla de movimientos; si no, null. periodo_fin = fecha de corte.
   Antes de responder comprueba: saldo inicial + abonos − cargos = saldo final. Si no cuadra, vuelve a leer esos números con cuidado; si sigue sin cuadrar, deja lo que dice el documento y anótalo en "dudas".
 - Solicitud: nombre, correo, celular (10 dígitos) y domicilio.
-- Cotización: marca, modelo y versión, año (modelo del auto) y precio total del auto.
+- Cotización: marca, modelo y versión, año (modelo del auto), precio total del auto y, si aparece, el nombre del cliente.
+- Comprobante de domicilio: emisor, titular, domicilio (calle y número, colonia, CP, municipio/estado) y fecha de emisión.
 - Fechas en formato AAAA-MM-DD. Montos como número sin $ ni comas (ej. 45230.5).
 
 Responde SOLO con JSON con esta forma exacta (en cada documento llena solo la sección de su tipo; las demás van en null):
-{"documentos":[{"tipo":"ine","legible":true,
+{"documentos":[{"tipo":"ine","descripcion":"INE frente","legible":true,
 "ine":{"nombre_completo":null,"fecha_nacimiento":null,"curp":null,"calle_numero":null,"colonia":null,"cp":null,"municipio_estado":null,"vigencia":null},
 "estado_cuenta":{"banco":null,"titular":null,"cuenta_terminacion":null,"periodo_inicio":null,"periodo_fin":null,"saldo_inicial":null,"total_depositos_abonos":null,"total_retiros_cargos":null,"saldo_final":null,"evidencia_total":null,"suma_abonos_movimientos":null},
 "solicitud":{"nombre_completo":null,"correo":null,"telefono_celular":null,"calle_numero":null,"colonia":null,"cp":null,"municipio_estado":null},
-"cotizacion":{"marca":null,"modelo":null,"anio":null,"precio":null},
+"cotizacion":{"marca":null,"modelo":null,"anio":null,"precio":null,"cliente_nombre":null},
+"comprobante_domicilio":{"emisor":null,"titular":null,"calle_numero":null,"colonia":null,"cp":null,"municipio_estado":null,"fecha_emision":null},
 "dudas":[]}]}`;
 
 const NUL = (t) => ({ anyOf: [{ type: t }, { type: "null" }] });
 const OBJ = (props) => ({ type: "object", additionalProperties: false, required: Object.keys(props), properties: props });
 const NOBJ = (props) => ({ anyOf: [OBJ(props), { type: "null" }] });
 const ESQUEMA = OBJ({ documentos: { type: "array", items: OBJ({
-  tipo: { type: "string", enum: ["ine", "estado_cuenta", "solicitud", "cotizacion", "otro"] },
+  tipo: { type: "string", enum: ["ine", "estado_cuenta", "solicitud", "cotizacion", "comprobante_domicilio", "otro"] },
+  descripcion: NUL("string"),
   legible: { type: "boolean" },
   ine: NOBJ({ nombre_completo: NUL("string"), fecha_nacimiento: NUL("string"), curp: NUL("string"), calle_numero: NUL("string"), colonia: NUL("string"), cp: NUL("string"), municipio_estado: NUL("string"), vigencia: NUL("integer") }),
   estado_cuenta: NOBJ({ banco: NUL("string"), titular: NUL("string"), cuenta_terminacion: NUL("string"), periodo_inicio: NUL("string"), periodo_fin: NUL("string"), saldo_inicial: NUL("number"), total_depositos_abonos: NUL("number"), total_retiros_cargos: NUL("number"), saldo_final: NUL("number"), evidencia_total: NUL("string"), suma_abonos_movimientos: NUL("number") }),
   solicitud: NOBJ({ nombre_completo: NUL("string"), correo: NUL("string"), telefono_celular: NUL("string"), calle_numero: NUL("string"), colonia: NUL("string"), cp: NUL("string"), municipio_estado: NUL("string") }),
-  cotizacion: NOBJ({ marca: NUL("string"), modelo: NUL("string"), anio: NUL("integer"), precio: NUL("number") }),
+  cotizacion: NOBJ({ marca: NUL("string"), modelo: NUL("string"), anio: NUL("integer"), precio: NUL("number"), cliente_nombre: NUL("string") }),
+  comprobante_domicilio: NOBJ({ emisor: NUL("string"), titular: NUL("string"), calle_numero: NUL("string"), colonia: NUL("string"), cp: NUL("string"), municipio_estado: NUL("string"), fecha_emision: NUL("string") }),
   dudas: { type: "array", items: { type: "string" } },
 }) } });
 const ESQUEMA_GIRO = OBJ({ opcion: { type: "string", enum: ["A", "B", "C", "D"] } });
@@ -499,11 +514,13 @@ const SECCIONES = {
   ine: ["nombre_completo", "fecha_nacimiento", "curp", "calle_numero", "colonia", "cp", "municipio_estado", "vigencia"],
   estado_cuenta: ["banco", "titular", "periodo_inicio", "periodo_fin", "total_depositos_abonos", "suma_abonos_movimientos", "cuenta_terminacion", "saldo_inicial", "total_retiros_cargos", "saldo_final", "evidencia_total"],
   solicitud: ["nombre_completo", "correo", "telefono_celular", "calle_numero", "colonia", "cp", "municipio_estado"],
-  cotizacion: ["marca", "modelo", "anio", "precio"],
+  cotizacion: ["marca", "modelo", "anio", "precio", "cliente_nombre"],
+  comprobante_domicilio: ["emisor", "titular", "calle_numero", "colonia", "cp", "municipio_estado", "fecha_emision"],
 };
 const CRITICOS = { ine: ["nombre_completo", "fecha_nacimiento", "curp", "calle_numero", "colonia", "cp"],
   solicitud: ["nombre_completo", "correo", "telefono_celular", "calle_numero", "colonia", "cp"],
-  cotizacion: ["modelo", "anio", "precio"], estado_cuenta: ["total_depositos_abonos", "periodo_fin", "banco"] };
+  cotizacion: ["modelo", "anio", "precio"], estado_cuenta: ["total_depositos_abonos", "periodo_fin", "banco"],
+  comprobante_domicilio: ["titular", "calle_numero", "cp", "fecha_emision"] };
 const NUMERICOS = new Set(["total_depositos_abonos", "suma_abonos_movimientos", "precio", "anio", "vigencia", "saldo_inicial", "total_retiros_cargos", "saldo_final"]);
 
 function num(v) {
@@ -529,8 +546,8 @@ function fechaDeCurp(c) { if (!CURP_RE.test(c || "")) return null; return `${/\d
 function normalizar(raw) {
   const lista = Array.isArray(raw?.documentos) ? raw.documentos : Array.isArray(raw) ? raw : raw?.tipo ? [raw] : [];
   return lista.map((d) => {
-    const tipo = ["ine", "estado_cuenta", "solicitud", "cotizacion"].includes(d?.tipo) ? d.tipo : "otro";
-    const out = { tipo, legible: d?.legible !== false, dudas: Array.isArray(d?.dudas) ? d.dudas.map(String).filter(Boolean) : [] };
+    const tipo = SECCIONES[d?.tipo] ? d.tipo : "otro";
+    const out = { tipo, descripcion: txt(d?.descripcion), legible: d?.legible !== false, dudas: Array.isArray(d?.dudas) ? d.dudas.map(String).filter(Boolean) : [] };
     if (tipo !== "otro") {
       const sec = d?.[tipo] || {}; out[tipo] = {};
       for (const k of SECCIONES[tipo]) out[tipo][k] = NUMERICOS.has(k) ? num(sec[k]) : txt(sec[k]);
@@ -583,6 +600,11 @@ function validar(d) {
     const c = d.cotizacion, y = new Date().getFullYear();
     if (c.anio !== null && (c.anio < 2000 || c.anio > y + 2)) p.push(`año del auto ${c.anio} fuera de rango`);
     if (c.precio !== null && (c.precio < 50000 || c.precio > 10000000)) p.push(`precio ${MXN.format(c.precio)} fuera de rango normal`);
+  }
+  if (d.comprobante_domicilio) {
+    const c = d.comprobante_domicilio;
+    if (c.cp && !/^\d{5}$/.test(c.cp.trim())) p.push(`CP del comprobante "${c.cp}" no tiene 5 dígitos`);
+    if (c.fecha_emision && !fechaValida(c.fecha_emision)) p.push(`fecha del comprobante "${c.fecha_emision}" no es válida`);
   }
   if (d.estado_cuenta) {
     const e = d.estado_cuenta;
@@ -699,16 +721,16 @@ function curpVsNombre(curp, nombre) {
 }
 function fusionar(docs, tipo) {
   const out = {}; let hay = false;
-  for (const d of docs) if (d.tipo === tipo && d[tipo] && d.legible) { hay = true; for (const [k, v] of Object.entries(d[tipo])) if (out[k] == null && v != null) out[k] = v; }
+  for (const d of docs) if (d.tipo === tipo && d[tipo]) { hay = true; for (const [k, v] of Object.entries(d[tipo])) if (out[k] == null && v != null) out[k] = v; }
   return hay ? out : null;
 }
 function armarFicha() {
   const docs = S.files.flatMap((f) => f.docs || []);
-  const ine = fusionar(docs, "ine"), sol = fusionar(docs, "solicitud"), cot = fusionar(docs, "cotizacion");
+  const ine = fusionar(docs, "ine"), sol = fusionar(docs, "solicitud"), cot = fusionar(docs, "cotizacion"), com = fusionar(docs, "comprobante_domicilio");
   const avisos = [];
   // Estados de cuenta: sin duplicados, del más reciente al más antiguo
   const vistos = new Set(), estados = [];
-  for (const d of docs) if (d.tipo === "estado_cuenta" && d.estado_cuenta && d.legible) {
+  for (const d of docs) if (d.tipo === "estado_cuenta" && d.estado_cuenta) {
     const e = d.estado_cuenta, k = `${(e.banco || "").toLowerCase()}|${e.periodo_fin || ""}`;
     if (e.periodo_fin && vistos.has(k)) continue; vistos.add(k); estados.push(e);
   }
@@ -732,10 +754,14 @@ function armarFicha() {
   let dirSrc = null, D = null;
   if (ine?.calle_numero) { D = ine; dirSrc = "INE"; }
   else if (sol?.calle_numero) { D = sol; dirSrc = ine ? "Solicitud (la INE no trae calle)" : "Solicitud"; }
+  else if (com?.calle_numero) { D = com; dirSrc = ine ? "Comprobante de domicilio (la INE no trae calle)" : "Comprobante de domicilio"; }
   else if (ine) { D = ine; dirSrc = "INE (sin calle)"; }
   const direccion = D ? [D.calle_numero, D.colonia, D.cp ? `CP ${D.cp}` : null, D.municipio_estado].filter(Boolean).join(", ") : null;
 
-  const nombre = ine?.nombre_completo || sol?.nombre_completo || null;
+  const titularEdo = estados.find((e) => e.titular)?.titular || null;
+  const [nombre, nombreSrc] = [[ine?.nombre_completo, "INE"], [sol?.nombre_completo, "Solicitud"], [titularEdo, "Estado de cuenta"],
+    [com?.titular, "Comprobante de domicilio"], [cot?.cliente_nombre, "Cotización"]].find(([v]) => v) || [null, null];
+  if (nombre && nombreSrc !== "INE") avisos.push(`El nombre se tomó de: ${nombreSrc} (no se leyó en una INE). Confírmalo con la identificación.`);
   if (ine?.nombre_completo && sol?.nombre_completo && !mismoNombre(ine.nombre_completo, sol.nombre_completo))
     avisos.push(`El nombre de la solicitud (${sol.nombre_completo}) no coincide con el de la INE.`);
   for (const e of usados) if (nombre && e.titular && !mismoNombre(nombre, e.titular))
@@ -743,7 +769,7 @@ function armarFicha() {
 
   for (const f of S.files) {
     for (const d of f.docs || []) {
-      if (!d.legible) avisos.push(`${f.name}: ${ETIQ[d.tipo]} ilegible; pide otra foto.`);
+      if (!d.legible) avisos.push(`${f.name}: ${ETIQ[d.tipo]} difícil de leer; se usó lo que sí se leyó. Revísalo o pide otra foto.`);
       for (const x of d.dudas) avisos.push(`${ETIQ[d.tipo]} · ${x}`);
     }
   }
@@ -804,9 +830,23 @@ function armarFicha() {
     if (ine.cp.trim() !== sol.cp.trim()) avisos.push(`El CP de la solicitud (${sol.cp}) es distinto al de la INE (${ine.cp}); el cliente pudo cambiar de domicilio.`);
     else verificados.push("El código postal de la solicitud coincide con la INE.");
   }
+  if (com) {
+    if (com.fecha_emision) {
+      const dias = (Date.now() - Date.parse(com.fecha_emision + "T00:00:00")) / 86400000;
+      if (dias > 90) avisos.push(`El comprobante de domicilio es del ${com.fecha_emision}: tiene más de 3 meses.`);
+      else if (dias >= 0) verificados.push("El comprobante de domicilio tiene menos de 3 meses.");
+    } else avisos.push("No se encontró la fecha del comprobante de domicilio; revisa que sea reciente.");
+    const cpRef = D && D !== com ? D.cp : (ine?.cp || sol?.cp);
+    if (com.cp && cpRef) {
+      if (com.cp.trim() !== cpRef.trim()) avisos.push(`El CP del comprobante de domicilio (${com.cp}) no coincide con el de la dirección del cliente (${cpRef}).`);
+      else verificados.push("El comprobante de domicilio coincide con el código postal del cliente.");
+    }
+    if (com.titular && nombre && nombreSrc !== "Comprobante de domicilio" && !mismoNombre(nombre, com.titular))
+      avisos.push(`El comprobante de domicilio está a nombre de ${com.titular}, no del cliente (puede ser de un familiar; confírmalo).`);
+  }
   return {
     campos: {
-      nombre: { v: nombre, src: ine?.nombre_completo ? "INE" : sol?.nombre_completo ? "Solicitud" : null },
+      nombre: { v: nombre, src: nombreSrc },
       fecha_nacimiento: { v: ine?.fecha_nacimiento || null, src: ine?.fecha_nacimiento ? "INE" : null },
       direccion: { v: direccion, src: dirSrc },
       correo: { v: sol?.correo || null, src: sol?.correo ? "Solicitud" : null },
@@ -817,7 +857,7 @@ function armarFicha() {
       auto_precio: { v: cot?.precio != null ? MXN.format(cot.precio) : null, src: cot?.precio != null ? "Cotización" : null },
     },
     estados, usados, promedio, avisos: [...new Set(avisos)], verificados,
-    tiene: { ine: !!ine, solicitud: !!sol, cotizacion: !!cot, estados: conTotal.length },
+    tiene: { ine: !!ine, solicitud: !!sol, cotizacion: !!cot, comprobante: !!com, estados: conTotal.length },
   };
 }
 const ETQ_CAMPOS = { nombre: "Nombre completo", fecha_nacimiento: "Fecha de nacimiento", direccion: "Dirección", correo: "Correo", celular: "Celular",
@@ -830,7 +870,7 @@ const valor = (ficha, k) => S.overrides[k] ?? ficha.campos[k].v ?? "";
 function render() {
   const ficha = armarFicha();
   // Checklist
-  const req = [["INE", ficha.tiene.ine], ["Solicitud", ficha.tiene.solicitud], ["Cotización", ficha.tiene.cotizacion],
+  const req = [["INE", ficha.tiene.ine], ["Solicitud", ficha.tiene.solicitud], ["Cotización", ficha.tiene.cotizacion], ["Comprobante de domicilio", ficha.tiene.comprobante],
     [`Estados de cuenta ${Math.min(3, ficha.tiene.estados)}/3`, ficha.tiene.estados >= 3]];
   $("checklist").replaceChildren(...req.map(([t, ok]) => el("li", { className: ok ? "ok" : "" }, t)));
 
@@ -870,15 +910,17 @@ function filaArchivo(f) {
     : f.status === "procesando" ? el("span", { className: "stamp run" }, f.paso || "Procesando…")
     : f.status === "error" ? el("span", { className: "stamp err" }, "No se leyó")
     : null;
-  const tipos = (f.docs || []).map((d) => el("span", { className: "stamp doc" }, d.legible ? ETIQ[d.tipo] : ETIQ[d.tipo] + " · ilegible"));
+  const tipos = (f.docs || []).map((d) => el("span", { className: "stamp doc" }, d.legible ? ETIQ[d.tipo] : ETIQ[d.tipo] + " · revisar"));
   const notas = el("ul", { className: "notes" },
     ...(f.ajustes || []).map((a) => el("li", {}, (f.kind === "pdf" ? "PDF: " : "Foto: ") + a)),
+    ...(f.docs || []).filter((d) => d.tipo === "otro").map((d) => el("li", { className: "duda" }, "No es uno de los documentos que se capturan" + (d.descripcion ? `; parece: ${d.descripcion}` : "") + ".")),
     ...(f.docs || []).flatMap((d) => d.dudas.map((x) => el("li", { className: "duda" }, x))),
     ...(f.error ? [el("li", { className: "err" }, f.error)] : []));
   const acciones = el("div", { className: "actions" });
   if (f.status === "error" && f.file && !S.bloqueado) acciones.append(el("button", { className: "btn small", type: "button", onclick: () => { f.status = "pendiente"; f.error = null; render(); correr(); } }, "Reintentar"));
   return el("li", { className: "file" }, thumb,
-    el("div", { style: "min-width:0" }, el("div", { className: "fname" }, f.name), el("div", { className: "fmeta" }, ...(estado ? [estado] : []), ...tipos), notas, acciones),
+    el("div", { style: "min-width:0" }, el("div", { className: "fname" }, f.name), el("div", { className: "fmeta" }, ...(estado ? [estado] : []), ...tipos), notas, ...((f.docs || []).length ? [el("details", { className: "detalle" }, el("summary", {}, "Ver datos leídos"),
+      el("pre", {}, JSON.stringify(f.docs.map((d) => ({ tipo: ETIQ[d.tipo], ...(d.descripcion ? { "qué es": d.descripcion } : {}), ...(d[d.tipo] || {}) })), null, 1)))] : []), acciones),
     el("button", { className: "x", type: "button", title: "Quitar archivo", "aria-label": `Quitar ${f.name}`, disabled: f.status === "procesando",
       onclick: () => { S.files = S.files.filter((x) => x !== f); if (f.preview) URL.revokeObjectURL(f.preview); render(); } }, "×"));
 }
@@ -983,6 +1025,8 @@ function cargarEjemplo() {
     { id: nextId++, name: "solicitud.jpg", kind: "img", status: "listo", ajustes: ["la enderecé 3.1°"],
       docs: [E("solicitud", { nombre_completo: "María Guadalupe Hernández Ruiz", correo: "lupita.hdz88@gmail.com", telefono_celular: "5523418876", calle_numero: "Calle Ermita 214 int. 3", colonia: "Santa Martha", cp: "09510", municipio_estado: "Iztapalapa, CDMX" },
         ["el correo decía \"gmial.com\"; lo cambié a gmail.com", "celular: 5523418876 o 5523418816"])] },
+    { id: nextId++, name: "recibo_cfe.jpg", kind: "img", status: "listo", ajustes: ["la enderecé 1.8°"],
+      docs: [{ ...E("comprobante_domicilio", { emisor: "CFE", titular: "MARIA GUADALUPE HERNANDEZ RUIZ", calle_numero: "ERMITA 214 INT 3", colonia: "SANTA MARTHA", cp: "09510", municipio_estado: "IZTAPALAPA, CDMX", fecha_emision: "2026-10-20" }), descripcion: "Recibo CFE bimestral" }] },
     { id: nextId++, name: "cotizacion_versa.pdf", kind: "pdf", status: "listo", ajustes: ["digital, leí el texto de 1 página(s)"],
       docs: [E("cotizacion", { marca: "Nissan", modelo: "Versa Advance CVT", anio: 2026, precio: 359900 })] },
     { id: nextId++, name: "estados_bbva.pdf", kind: "pdf", status: "listo", ajustes: ["digital, leí el texto de 18 página(s)"],

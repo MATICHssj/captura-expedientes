@@ -107,3 +107,20 @@ def test_monto_completo_no_pedazos():
     assert monto_en_texto(1500, "Abonos $1500.00 y otros")
     assert monto_en_texto(1234567.89, "Total 1,234,567.89")
     assert monto_en_texto(1234567.89, "Total 1 234 567.89")
+
+
+def test_comprobante_domicilio():
+    from app.schemas import ComprobanteDomicilio
+    d = DocExtraction(tipo="comprobante_domicilio", descripcion="Recibo CFE",
+                      comprobante_domicilio=ComprobanteDomicilio(titular="ANA", cp="0951", fecha_emision="2026-02-30"))
+    p = validar(d)
+    assert any("CP del comprobante" in x for x in p) and any("fecha del comprobante" in x for x in p)
+    ok = DocExtraction(tipo="comprobante_domicilio", comprobante_domicilio=ComprobanteDomicilio(cp="09510", fecha_emision="2026-10-20"))
+    assert validar(ok) == []
+
+
+def test_guia_en_instrucciones():
+    import os
+    os.environ.setdefault("ANTHROPIC_API_KEY", "prueba")
+    from app import extractor
+    assert "comprobante_domicilio" in extractor.SYSTEM and "IDMEX" in extractor.SYSTEM and "{" not in extractor.SYSTEM
