@@ -129,3 +129,20 @@ def test_cuenta_beta_desde_variables(tmp_path, monkeypatch):
         with TestClient(web.app) as c:
             assert c.post("/api/login", json={"email": "equipo@beta.mx", "password": "probando2026"}).status_code == 200
             assert c.get("/api/me").json()["uso"]["limite"] == 200
+
+
+def test_busca_de_nuevo_lo_que_falta(monkeypatch):
+    from app import extractor
+    from app.schemas import Solicitud, INE
+    monkeypatch.setattr(extractor, "_bloques", lambda data, mime, notas: ["bloque"])
+    completa = Solicitud(nombre_completo="Ana Ruiz", correo="ana@gmail.com", telefono_celular="5512345678", calle_numero="Ermita 2", cp="09510")
+    lecturas = [[DocExtraction(tipo="solicitud", solicitud=completa.model_copy(update={"correo": None}))],
+                [DocExtraction(tipo="solicitud", solicitud=completa)]]
+    prompts = []
+    monkeypatch.setattr(extractor, "_leer", lambda b, instr: prompts.append(instr) or lecturas[len(prompts) - 1])
+    docs, _ = extractor.extraer_documentos(b"x", "image/jpeg")
+    assert len(prompts) == 2 and "falta correo" in prompts[1]
+    assert docs[0].solicitud.correo == "ana@gmail.com"
+    # el reverso de la INE no trae nombre: no dispara otra búsqueda
+    assert extractor.faltantes(DocExtraction(tipo="ine", descripcion="INE reverso", ine=INE())) == []
+    assert "curp" in extractor.faltantes(DocExtraction(tipo="ine", descripcion="INE frente", ine=INE(nombre_completo="ANA")))

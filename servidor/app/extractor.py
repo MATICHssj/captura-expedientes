@@ -2,7 +2,7 @@ import base64, json, os
 import anthropic
 from .orientacion import detectar_rotacion
 from .preprocess import calidad_baja, preparar_imagen
-from .guia import COMO_RECONOCER
+from .guia import BUSQUEDA_MINUCIOSA, CLAVE, COMO_RECONOCER
 from .schemas import DocExtraction, Lectura
 from .validators import monto_en_texto, validar
 
@@ -17,6 +17,8 @@ solicitud en la misma foto): devuelve uno por cada documento en `documentos`. Si
 
 Clasifica cada documento: ine, estado_cuenta, solicitud, cotizacion, comprobante_domicilio u otro.
 {COMO_RECONOCER}
+
+{BUSQUEDA_MINUCIOSA}
 
 Cómo leer letra difícil:
 - Lee carácter por carácter. Usa el contexto: nombres y apellidos mexicanos comunes, colonias y municipios reales,
@@ -43,6 +45,8 @@ Otra lectura obtuvo el JSON de abajo, pero tiene estos posibles problemas:
 {problemas}
 
 No te fíes de esa lectura: vuelve a leer TODO el documento desde la imagen y devuelve tu propia extracción.
+Si un problema dice "falta", ese dato no se encontró: búscalo minuciosamente con todas sus etiquetas posibles, en todas
+las páginas, encabezados, pies, márgenes y recuadros. Si de verdad no aparece, déjalo en null.
 Corrige lo que esté mal. Si un campo sigue siendo dudoso, déjalo en `dudas` con las alternativas.
 
 Lectura anterior:
@@ -84,6 +88,16 @@ def _leer(bloques: list[dict], instruccion: str) -> list[DocExtraction] | None:
     if resp.stop_reason == "refusal" or resp.parsed_output is None:
         return None
     return resp.parsed_output.documentos or None
+
+
+def faltantes(d: DocExtraction) -> list[str]:
+    """Datos clave que quedaron vacíos (el reverso de la INE no trae nombre ni CURP: no cuenta)."""
+    sec = getattr(d, d.tipo, None) if d.tipo in CLAVE else None
+    if d.tipo == "otro" or (d.tipo == "ine" and "reverso" in (d.descripcion or "").lower()):
+        return []
+    if sec is None:
+        return list(CLAVE[d.tipo])
+    return [k for k in CLAVE[d.tipo] if getattr(sec, k) in (None, "")]
 
 
 def _criticos(d: DocExtraction) -> dict:
@@ -128,6 +142,7 @@ def _extraer(data: bytes, mime: str) -> tuple[list[DocExtraction], list[str]]:
 
     prob1 = [validar(d) for d in l1]
     problemas = [f"{d.tipo}: {x}" for d, p in zip(l1, prob1) for x in p + d.dudas]
+    problemas += [f"{d.tipo}: falta {k.replace('_', ' ')}" for d in l1 for k in faltantes(d)]
 
     def sin_segunda():
         for d, p in zip(l1, prob1):
