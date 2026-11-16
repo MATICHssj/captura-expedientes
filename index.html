@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Captura de Expedientes</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Captura de Expedientes"%3E%3Crect width="64" height="64" rx="14" fill="#116d4e"/%3E%3Cpath d="M17 10h20.5L48 20.5V51a3 3 0 0 1-3 3H17a3 3 0 0 1-3-3V13a3 3 0 0 1 3-3z" fill="#ffffff"/%3E%3Cpath d="M37.5 10v8a2.5 2.5 0 0 0 2.5 2.5h8z" fill="#bfe0d2"/%3E%3Cpath d="M19.5 29.5l2.6-4.6a2 2 0 0 1 1.7-1h8.4a2 2 0 0 1 1.7 1l2.6 4.6h.9a1.6 1.6 0 0 1 1.6 1.6V35h-21.6v-3.9a1.6 1.6 0 0 1 1.6-1.6z" fill="#116d4e"/%3E%3Ccircle cx="23.6" cy="35.4" r="2.6" fill="#116d4e" stroke="#ffffff" stroke-width="1.2"/%3E%3Ccircle cx="34.4" cy="35.4" r="2.6" fill="#116d4e" stroke="#ffffff" stroke-width="1.2"/%3E%3Crect x="19" y="41.5" width="15" height="2.6" rx="1.3" fill="#9cc9b6"/%3E%3Crect x="19" y="46.5" width="10" height="2.6" rx="1.3" fill="#9cc9b6"/%3E%3Ccircle cx="45" cy="45" r="11" fill="#f2b84b" stroke="#116d4e" stroke-width="3"/%3E%3Cpath d="M39.6 45.2l3.6 3.6 6.6-7" fill="none" stroke="#116d4e" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
@@ -56,6 +57,8 @@ body {
 }
 .wrap { max-width: 1180px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
 h1, h2, h3 { font-family: var(--f-display); font-weight: 600; margin: 0; text-wrap: balance; letter-spacing: .01em; }
+.marca { display: flex; gap: 14px; align-items: center; }
+.marca .logo { width: 52px; height: 52px; flex: none; }
 h1 { font-size: 1.75rem; line-height: 1.15; }
 h2 { font-size: 1.15rem; }
 .eyebrow { font-family: var(--f-data); font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
@@ -159,8 +162,10 @@ footer { color: var(--muted); font-size: .82rem; max-width: 80ch; }
 <div class="wrap">
   <header class="top">
     <div>
-      <div class="eyebrow">Crédito automotriz · captura</div>
-      <h1>Captura de Expedientes</h1>
+      <div class="marca"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" class="logo" aria-hidden="true" focusable="false"><rect width="64" height="64" rx="14" fill="#116d4e"/><path d="M17 10h20.5L48 20.5V51a3 3 0 0 1-3 3H17a3 3 0 0 1-3-3V13a3 3 0 0 1 3-3z" fill="#ffffff"/><path d="M37.5 10v8a2.5 2.5 0 0 0 2.5 2.5h8z" fill="#bfe0d2"/><path d="M19.5 29.5l2.6-4.6a2 2 0 0 1 1.7-1h8.4a2 2 0 0 1 1.7 1l2.6 4.6h.9a1.6 1.6 0 0 1 1.6 1.6V35h-21.6v-3.9a1.6 1.6 0 0 1 1.6-1.6z" fill="#116d4e"/><circle cx="23.6" cy="35.4" r="2.6" fill="#116d4e" stroke="#ffffff" stroke-width="1.2"/><circle cx="34.4" cy="35.4" r="2.6" fill="#116d4e" stroke="#ffffff" stroke-width="1.2"/><rect x="19" y="41.5" width="15" height="2.6" rx="1.3" fill="#9cc9b6"/><rect x="19" y="46.5" width="10" height="2.6" rx="1.3" fill="#9cc9b6"/><circle cx="45" cy="45" r="11" fill="#f2b84b" stroke="#116d4e" stroke-width="3"/><path d="M39.6 45.2l3.6 3.6 6.6-7" fill="none" stroke="#116d4e" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg><div>
+        <div class="eyebrow">Crédito automotriz · captura</div>
+        <h1>Captura de Expedientes</h1>
+      </div></div>
       <p>Arrastra la INE, la solicitud, la cotización, el comprobante de domicilio y los estados de cuenta. La página endereza las fotos, las lee con Claude y arma la ficha con el promedio de abonos.</p>
     </div>
     <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
@@ -450,6 +455,24 @@ En TODOS los documentos llena "descripcion" con una frase corta de qué es (ej. 
 Si un documento trae el nombre de una persona, NO lo dejes en null: en la INE y la solicitud va en nombre_completo, en el estado de cuenta y el comprobante en titular, y en la cotización en cliente_nombre.
 Un archivo puede traer varios documentos (ej. un PDF con 3 estados de cuenta, o INE y solicitud en la misma foto): devuelve uno por cada documento.
 
+Método de trabajo (sé minucioso, no te quedes con la primera lectura):
+1. Recorre el documento COMPLETO: todas las páginas e imágenes, de arriba a abajo, incluidos encabezados, pies de página, márgenes, recuadros, sellos, letra pequeña y el reverso.
+2. Para cada campo del tipo de documento, busca TODAS sus etiquetas posibles (cada banco y cada formato lo llama distinto):
+   - Saldo inicial: "Saldo anterior", "Saldo inicial", "Saldo al inicio del periodo", "Saldo del periodo anterior".
+   - Abonos: "Depósitos", "Abonos", "Total de abonos", "Créditos", "Depósitos / Abonos (+)", "Entradas".
+   - Cargos: "Retiros", "Cargos", "Total de cargos", "Débitos", "Retiros / Cargos (-)", "Salidas".
+   - Saldo final: "Saldo final", "Saldo al corte", "Saldo actual", "Saldo a la fecha de corte", "Saldo nuevo".
+   - Periodo: "Periodo", "Fecha de corte", "Del ... al ...", "Periodo del ... al ...".
+   - Cuenta: "No. de cuenta", "Cuenta", "CLABE", "Número de tarjeta" (solo los últimos 4 dígitos).
+   - Correo: "Correo electrónico", "E-mail", "Email", "Correo".
+   - Celular: "Celular", "Tel. celular", "Teléfono móvil", "Cel.", "Móvil", "WhatsApp" (no confundir con teléfono de casa, de oficina ni de referencias).
+   - Domicilio: "Domicilio", "Dirección", "Calle", "No. ext.", "No. int.", "Colonia", "C.P.", "Código postal", "Municipio", "Alcaldía", "Estado".
+   - Fecha del comprobante: "Fecha de emisión", "Fecha de expedición", "Fecha límite de pago", "Periodo facturado", "Mes de facturación".
+   - Precio del auto: "Precio", "Precio de lista", "Precio total", "Valor factura", "Precio unitario" (no confundir con enganche ni mensualidad).
+3. En la solicitud, distingue los datos del SOLICITANTE de los del cónyuge, aval, referencias o empresa: toma solo los del solicitante.
+4. Si el documento trae varias tablas o resúmenes, usa el RESUMEN del periodo para los totales.
+5. Antes de responder, revisa cada campo que dejaste en null y vuelve a buscarlo una vez más en todo el documento. Solo déjalo en null si de verdad no aparece.
+
 Cómo leer letra difícil:
 - Lee carácter por carácter. Si recibes la foto completa y franjas realzadas, usa las franjas para el detalle y la completa para el contexto.
 - Usa el contexto: nombres y apellidos mexicanos comunes, colonias y municipios reales, dominios de correo comunes (gmail.com, hotmail.com, outlook.com, yahoo.com.mx, icloud.com, live.com.mx).
@@ -497,7 +520,8 @@ const VERIFICAR = (problemas, previo) => `${INSTRUCCIONES}
 SEGUNDA REVISIÓN. Otra lectura de este mismo archivo dio el JSON de abajo, pero tiene estos posibles problemas:
 ${problemas.map((p) => "- " + p).join("\n")}
 
-No te fíes de esa lectura: vuelve a leer TODO desde las imágenes/texto, carácter por carácter, y devuelve tu propia extracción completa con la misma forma JSON. Si un campo sigue dudoso, déjalo en "dudas" con las alternativas.
+No te fíes de esa lectura: vuelve a leer TODO desde las imágenes/texto, carácter por carácter, y devuelve tu propia extracción completa con la misma forma JSON.
+Si un problema dice "falta", ese dato no se encontró: búscalo minuciosamente con todas sus etiquetas posibles, en todas las páginas, encabezados, pies, márgenes y recuadros. Si de verdad no aparece, déjalo en null. Si un campo sigue dudoso, déjalo en "dudas" con las alternativas.
 
 Lectura anterior:
 ${JSON.stringify(previo)}`;
@@ -521,6 +545,12 @@ const CRITICOS = { ine: ["nombre_completo", "fecha_nacimiento", "curp", "calle_n
   solicitud: ["nombre_completo", "correo", "telefono_celular", "calle_numero", "colonia", "cp"],
   cotizacion: ["modelo", "anio", "precio"], estado_cuenta: ["total_depositos_abonos", "periodo_fin", "banco"],
   comprobante_domicilio: ["titular", "calle_numero", "cp", "fecha_emision"] };
+const CLAVE = {"ine": ["nombre_completo", "fecha_nacimiento", "curp", "colonia", "cp"], "solicitud": ["nombre_completo", "correo", "telefono_celular", "calle_numero", "cp"], "cotizacion": ["modelo", "anio", "precio"], "estado_cuenta": ["banco", "titular", "periodo_fin", "saldo_inicial", "total_depositos_abonos", "total_retiros_cargos", "saldo_final"], "comprobante_domicilio": ["titular", "calle_numero", "cp", "fecha_emision"]};
+function faltantes(d) {
+  if (d.tipo === "otro" || !CLAVE[d.tipo] || (d.tipo === "ine" && /reverso/i.test(d.descripcion || ""))) return [];
+  const sec = d[d.tipo];
+  return sec ? CLAVE[d.tipo].filter((k) => sec[k] === null || sec[k] === undefined || sec[k] === "") : [...CLAVE[d.tipo]];
+}
 const NUMERICOS = new Set(["total_depositos_abonos", "suma_abonos_movimientos", "precio", "anio", "vigencia", "saldo_inicial", "total_retiros_cargos", "saldo_final"]);
 
 function num(v) {
@@ -685,6 +715,7 @@ async function procesar(item) {
   if (!lectura1.length) throw new Error("No encontré ningún documento en el archivo.");
   const prob1 = lectura1.map((d) => validar(d));
   const problemas = lectura1.flatMap((d, i) => prob1[i].concat(d.dudas).map((x) => `${ETIQ[d.tipo]}: ${x}`));
+  problemas.push(...lectura1.flatMap((d) => faltantes(d).map((k) => `${ETIQ[d.tipo]}: falta ${k.replace(/_/g, " ")}`)));   // búsqueda enfocada en lo que falta
   const sinSegunda = () => { lectura1.forEach((d, i) => d.dudas = [...new Set(prob1[i].concat(d.dudas))]); terminar(lectura1); };
   if (!problemas.length || lectura1.every((d) => d.tipo === "otro" || !d.legible)) { sinSegunda(); return; }
 
