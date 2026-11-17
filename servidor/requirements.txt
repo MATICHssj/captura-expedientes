@@ -9,3 +9,4 @@ opencv-python-headless>=4.9
 numpy
 python-multipart
 pypdf>=4
+pillow-heif

@@ -122,7 +122,38 @@ def _tipo_real(data: bytes) -> str | None:
         return "image/png"
     if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
         return "image/webp"
+    if data[4:8] == b"ftyp" and data[8:12] in (b"heic", b"heix", b"hevc", b"hevx", b"mif1", b"msf1", b"heim", b"heis"):
+        return "image/heic"
+    if data[:4] in (b"II*\x00", b"MM\x00*"):
+        return "image/tiff"
+    if data[:4] == b"GIF8" or data[:2] == b"BM":
+        return "image/otra"
     return None
+
+
+def _convertir(data: bytes, mime: str) -> tuple[bytes, str]:
+    """HEIC (iPhone), TIFF de escáner, GIF o BMP → JPEG (o PDF si el TIFF trae varias páginas)."""
+    if mime in ("application/pdf", "image/jpeg", "image/png", "image/webp"):
+        return data, mime
+    import io
+    from PIL import Image, ImageOps, ImageSequence
+    if mime == "image/heic":
+        try:
+            import pillow_heif
+            pillow_heif.register_heif_opener()
+        except ImportError:
+            raise HTTPException(415, "Foto HEIC de iPhone: compártela como JPG o activa Ajustes › Cámara › Formatos › Más compatible.")
+    try:
+        img = Image.open(io.BytesIO(data))
+        paginas = [ImageOps.exif_transpose(p.convert("RGB")) for p in ImageSequence.Iterator(img)][:30]
+    except Exception:
+        raise HTTPException(415, "No se pudo abrir la imagen. Guárdala como JPG o PDF y súbela de nuevo.")
+    buf = io.BytesIO()
+    if len(paginas) > 1:
+        paginas[0].save(buf, "PDF", save_all=True, append_images=paginas[1:], resolution=200)
+        return buf.getvalue(), "application/pdf"
+    paginas[0].save(buf, "JPEG", quality=92)
+    return buf.getvalue(), "image/jpeg"
 
 
 @app.post("/api/leer")
@@ -134,7 +165,8 @@ def leer(request: Request, archivo: UploadFile = File(...)):
         raise HTTPException(413, "El archivo pasa de 20 MB. Sube solo las páginas necesarias.")
     mime = _tipo_real(data)
     if not mime:
-        raise HTTPException(415, "Formato no soportado. Usa JPG, PNG, WEBP o PDF.")
+        raise HTTPException(415, "Formato no soportado. Usa foto (JPG, PNG, HEIC, TIFF) o PDF. Un Word o Excel guárdalo como PDF.")
+    data, mime = _convertir(data, mime)
     if not db.reservar_documento(cl["id"], cl["limite_mes"]):
         raise HTTPException(402, f"Llegaste al límite de {cl['limite_mes']} documentos de tu plan este mes.")
     try:
