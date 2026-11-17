@@ -36,3 +36,20 @@ CLAVE = {
     "estado_cuenta": ["banco", "titular", "periodo_fin", "saldo_inicial", "total_depositos_abonos", "total_retiros_cargos", "saldo_final"],
     "comprobante_domicilio": ["titular", "calle_numero", "cp", "fecha_emision"],
 }
+
+LETRA_A_MANO = """Formularios llenados a mano (solicitudes):
+- Separa la ETIQUETA impresa del VALOR escrito: el valor va a la derecha, debajo o sobre la línea o recuadro de su etiqueta. Nunca copies la etiqueta como valor ni tomes el valor del renglón de al lado.
+- Si el formato trae un recuadro por letra o número (cuadritos), lee un carácter por recuadro y júntalos.
+- Si algo está tachado o sobrescrito, usa lo que quedó al final, no lo tachado; si no se sabe cuál vale, ponlo en "dudas".
+- Mucha gente escribe en LETRA DE MOLDE mayúscula: el correo devuélvelo en minúsculas; los nombres, como vienen.
+- Celular: 10 dígitos. Quita espacios, guiones, paréntesis, "+52", "044" o "045". Toma el que diga celular, móvil o WhatsApp, no el de casa, oficina o referencias. Las ladas sirven para revisar (55 y 56 CDMX y zona metropolitana, 33 Guadalajara, 81 Monterrey), nunca para inventar dígitos.
+- Correo: respeta puntos, guiones, guion bajo y números. Una "@" mal hecha puede parecer una "a" encerrada, "(a)" o "Q". Si el usuario lleva un año o día (ej. lupita88) y hay fecha de nacimiento, úsala solo para desempatar un dígito dudoso y anótalo en "dudas".
+- Domicilio: abreviaturas comunes Av., C., Calz., Priv., Cda., And., Mz./Manz. (manzana), Lt. (lote), Edif., Depto., Int., Ext., S/N (sin número), Col., Fracc., U.H. Copia el domicilio como viene; no completes ni corrijas calles ni colonias.
+- CURP: 18 caracteres = 4 letras + 6 dígitos (AAMMDD de nacimiento) + H o M + 2 letras del estado + 3 consonantes + 1 letra o dígito + 1 dígito. Usa esa estructura para decidir si un carácter dudoso es letra o número (en las posiciones 5 a 10 solo hay dígitos: O→0, I→1, S→5, B→8).
+- Números a mano: el 1 con "gancho" parece 7 sin raya; muchos cruzan el 7; un 4 cerrado parece 9; el 0 puede llevar diagonal; un 5 apurado parece S y un 2 parece Z.
+
+Montos y fechas:
+- En México los montos usan coma de miles y punto decimal (31,250.40). Un "-", "CR" o "DB" junto al número indica signo o tipo; los totales del resumen van sin signo.
+- Fechas como "14/07/1988", "14-JUL-88" o "14 de julio de 1988" → 1988-07-14. Meses: ENE FEB MAR ABR MAY JUN JUL AGO SEP OCT NOV DIC.
+- Si recibes texto exacto extraído del archivo, úsalo para números y nombres (es exacto) y las imágenes para entender el formato.
+- Si unas páginas solo continúan un documento que empieza en otra parte del archivo (ej. hojas de movimientos sin el resumen), devuélvelas con descripcion "Continuación de …" y solo los datos que se vean."""

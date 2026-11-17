@@ -112,6 +112,7 @@ label.drop input { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .notes li.err { color: var(--bad); }
 .detalle summary { cursor: pointer; font-size: .8rem; color: var(--muted); margin-top: 6px; }
 .detalle pre { font-family: var(--f-data); font-size: .74rem; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px; margin: 6px 0 0; max-height: 260px; overflow: auto; }
+.clave-pdf { font: inherit; font-size: .88rem; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; min-width: 0; width: 13rem; max-width: 100%; }
 .x { border: 0; background: none; color: var(--muted); font-size: 1.2rem; line-height: 1; padding: 2px 6px; border-radius: 6px; }
 .x:hover { color: var(--bad); background: var(--bad-soft); }
 
@@ -205,9 +206,9 @@ footer { color: var(--muted); font-size: .82rem; max-width: 80ch; }
     <section class="panel" aria-labelledby="h-docs">
       <h2 id="h-docs">Documentos</h2>
       <label class="drop" id="drop">
-        <input id="file" type="file" multiple accept="image/jpeg,image/png,image/webp,application/pdf">
+        <input id="file" type="file" multiple accept="image/*,application/pdf,.pdf,.heic,.heif,.jfif,.tif,.tiff,.docx,.xlsx,.pptx,.zip,.txt">
         <strong id="drop-t">Arrastra aquí todos los documentos del cliente</strong>
-        <span>INE, solicitud, cotización, comprobante de domicilio y estados de cuenta, juntos o por partes · o toca para elegir varios · JPG, PNG o PDF</span>
+        <span>INE, solicitud, cotización, comprobante de domicilio y estados de cuenta, juntos o por partes · o toca para elegir varios · fotos (JPG, PNG, HEIC), PDF, Word, Excel o ZIP</span>
       </label>
       <ul class="checklist" id="checklist" aria-label="Documentos requeridos"></ul>
       <button class="btn primary" id="procesar" type="button" disabled>Leer documentos</button>
@@ -252,9 +253,10 @@ const ETIQ = { ine: "INE", estado_cuenta: "Estado de cuenta", solicitud: "Solici
 if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
 /* ============================================================
-   Imagen: enderezar, orientar, realzar
+   Imagen: recortar, enderezar, orientar, realzar
    ============================================================ */
-const MAX_SIDE = 2400;
+const MAX_SIDE = 3000;          // lado mayor con el que se trabaja la foto
+const MAX_ENVIO = 1150000;      // píxeles por imagen enviada: Claude ve ~1.15 MP, así que se reduce aquí con buen suavizado
 function lienzo(w, h) { const c = document.createElement("canvas"); c.width = Math.max(1, Math.round(w)); c.height = Math.max(1, Math.round(h)); return c; }
 function escalado(src, maxSide) {
   const sw = src.naturalWidth || src.width, sh = src.naturalHeight || src.height;
@@ -263,6 +265,23 @@ function escalado(src, maxSide) {
   x.fillStyle = "#fff"; x.fillRect(0, 0, c.width, c.height);
   x.imageSmoothingQuality = "high"; x.drawImage(src, 0, 0, c.width, c.height);
   return c;
+}
+/** Amplía una imagen chica para que las letras no lleguen diminutas. */
+function ampliar(src, lado) {
+  const sw = src.naturalWidth || src.width, sh = src.naturalHeight || src.height, s = lado / Math.max(sw, sh);
+  const c = lienzo(sw * s, sh * s), x = c.getContext("2d");
+  x.fillStyle = "#fff"; x.fillRect(0, 0, c.width, c.height);
+  x.imageSmoothingEnabled = true; x.imageSmoothingQuality = "high"; x.drawImage(src, 0, 0, c.width, c.height);
+  return c;
+}
+/** Reduce a lo que Claude realmente ve (≤1.15 MP y lado ≤1568), por mitades para no perder nitidez. */
+function paraEnviar(c) {
+  const w = c.width, h = c.height, s = Math.min(1, Math.sqrt(MAX_ENVIO / (w * h)), 1568 / Math.max(w, h));
+  if (s > 0.995) return c;
+  let cur = c;
+  while (cur.width / 2 > w * s) { const t = lienzo(cur.width / 2, cur.height / 2), x = t.getContext("2d"); x.imageSmoothingQuality = "high"; x.drawImage(cur, 0, 0, t.width, t.height); cur = t; }
+  const out = lienzo(w * s, h * s), x = out.getContext("2d"); x.imageSmoothingQuality = "high"; x.drawImage(cur, 0, 0, out.width, out.height);
+  return out;
 }
 /** Giro de 90/180/270 grados en sentido horario. */
 function girar90(src, deg) {
@@ -297,6 +316,125 @@ function nitidez(src) {
   }
   return n ? s / n : 0;
 }
+/** Umbral de Otsu sobre un arreglo de grises. */
+function otsu(g) {
+  const hist = new Uint32Array(256), tot = g.length;
+  for (let j = 0; j < tot; j++) hist[g[j] | 0]++;
+  let suma = 0; for (let i = 0; i < 256; i++) suma += i * hist[i];
+  let sB = 0, wB = 0, mejor = -1, th = 128;
+  for (let t = 0; t < 256; t++) {
+    wB += hist[t]; if (!wB) continue; const wF = tot - wB; if (!wF) break;
+    sB += t * hist[t]; const v = wB * wF * (sB / wB - (suma - sB) / wF) ** 2;
+    if (v > mejor) { mejor = v; th = t; }
+  }
+  return th;
+}
+/** Resuelve la homografía que lleva los puntos a[i] a b[i] (4 pares). */
+function homografia(a, b) {
+  const M = [], v = [];
+  for (let i = 0; i < 4; i++) {
+    const [x, y] = a[i], [X, Y] = b[i];
+    M.push([x, y, 1, 0, 0, 0, -x * X, -y * X]); v.push(X);
+    M.push([0, 0, 0, x, y, 1, -x * Y, -y * Y]); v.push(Y);
+  }
+  for (let c = 0; c < 8; c++) {                    // eliminación gaussiana con pivoteo
+    let p = c; for (let r = c + 1; r < 8; r++) if (Math.abs(M[r][c]) > Math.abs(M[p][c])) p = r;
+    [M[c], M[p]] = [M[p], M[c]]; [v[c], v[p]] = [v[p], v[c]];
+    if (Math.abs(M[c][c]) < 1e-12) return null;
+    for (let r = 0; r < 8; r++) if (r !== c) { const f = M[r][c] / M[c][c]; for (let k = c; k < 8; k++) M[r][k] -= f * M[c][k]; v[r] -= f * v[c]; }
+  }
+  return v.map((x, i) => x / M[i][i]).concat(1);
+}
+/** Separa la hoja del fondo (mesa) y corrige la perspectiva; aguanta sombras suaves.
+ *  c: imagen de trabajo; fuente: la misma imagen con más resolución (para recortar sin perder detalle). Si duda, regresa null. */
+function aplanarHoja(c, fuente = c) {
+  const { g: g0, w, h } = grises(c, 220), tot = w * h, g = new Float32Array(tot);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {       // suavizado 3x3: borra letras y renglones, deja la orilla de la hoja
+    let s = 0, n = 0;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const yy = y + dy, xx = x + dx; if (yy >= 0 && yy < h && xx >= 0 && xx < w) { s += g0[yy * w + xx]; n++; } }
+    g[y * w + x] = s / n;
+  }
+  // Fondo = lo que se alcanza desde las orillas de la foto sin cruzar un borde marcado (la orilla de la hoja)
+  const grad = new Float32Array(tot);
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) { const j = y * w + x; grad[j] = Math.hypot(g[j + 1] - g[j - 1], g[j + w] - g[j - w]) / 2; }
+  const fondo = new Uint8Array(tot), pila = [];
+  const sembrar = (j) => { if (!fondo[j] && grad[j] < 10) { fondo[j] = 1; pila.push(j); } };
+  for (let x = 0; x < w; x++) { sembrar(x); sembrar((h - 1) * w + x); }
+  for (let y = 0; y < h; y++) { sembrar(y * w); sembrar(y * w + w - 1); }
+  while (pila.length) {
+    const j = pila.pop(), x = j % w, y = (j / w) | 0;
+    for (const k of [x > 0 ? j - 1 : -1, x < w - 1 ? j + 1 : -1, y > 0 ? j - w : -1, y < h - 1 ? j + w : -1])
+      if (k >= 0 && !fondo[k] && grad[k] < 10 && Math.abs(g[k] - g[j]) < 7) { fondo[k] = 1; pila.push(k); }
+  }
+  // Hoja = la parte que no es fondo, conectada con el centro
+  let sx = -1, sy = -1, mejorD = Infinity;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (!fondo[y * w + x]) { const d = (x - w / 2) ** 2 + (y - h / 2) ** 2; if (d < mejorD) { mejorD = d; sx = x; sy = y; } }
+  if (sx < 0) return null;
+  const reg = new Uint8Array(tot); reg[sy * w + sx] = 1; pila.push(sy * w + sx); let n = 1;
+  while (pila.length) {
+    const j = pila.pop(), x = j % w, y = (j / w) | 0;
+    for (const k of [x > 0 ? j - 1 : -1, x < w - 1 ? j + 1 : -1, y > 0 ? j - w : -1, y < h - 1 ? j + w : -1])
+      if (k >= 0 && !reg[k] && !fondo[k]) { reg[k] = 1; n++; pila.push(k); }
+  }
+  if (n < tot * 0.05 || n > tot * 0.93) return null;
+  let tl = null, tr = null, br = null, bl = null, toca = 0;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    if (!reg[y * w + x]) continue;
+    if (x === 0 || y === 0 || x === w - 1 || y === h - 1) toca++;
+    const s = x + y, d = x - y;
+    if (!tl || s < tl[0] + tl[1]) tl = [x, y]; if (!br || s > br[0] + br[1]) br = [x, y];
+    if (!tr || d > tr[0] - tr[1]) tr = [x, y]; if (!bl || d < bl[0] - bl[1]) bl = [x, y];
+  }
+  if (toca > 2 * (w + h) * 0.25) return null;                      // la hoja se sale de la foto por todos lados: no hay fondo que quitar
+  const q = [tl, tr, br, bl];
+  let area = 0; for (let i = 0; i < 4; i++) { const [x1, y1] = q[i], [x2, y2] = q[(i + 1) % 4]; area += x1 * y2 - x2 * y1; }
+  area = Math.abs(area) / 2;
+  if (area < tot * 0.05 || area > tot * 0.92 || n / area < 0.8 || n / area > 1.15) return null;   // no parece un cuadrilátero lleno
+  for (let i = 0; i < 4; i++) {                                     // ángulos razonables (rectángulo visto de lado)
+    const [ax, ay] = q[(i + 3) % 4], [bx, by] = q[i], [cx, cy] = q[(i + 1) % 4];
+    const u = [ax - bx, ay - by], v = [cx - bx, cy - by], cos = (u[0] * v[0] + u[1] * v[1]) / (Math.hypot(...u) * Math.hypot(...v) || 1);
+    if (Math.abs(cos) > 0.5) return null;
+  }
+  let si = 0, so = 0; for (let j = 0; j < tot; j++) reg[j] ? si += g[j] : so += g[j];
+  if (si / n - so / Math.max(1, tot - n) < 25) return null;          // la hoja debe ser más clara que el fondo
+  const k = fuente.width / w, cx = q.reduce((s, p) => s + p[0], 0) / 4, cy = q.reduce((s, p) => s + p[1], 0) / 4;
+  const Q = q.map(([x, y]) => [Math.min(fuente.width - 1, Math.max(0, (cx + (x + 0.5 - cx) * 1.02) * k)), Math.min(fuente.height - 1, Math.max(0, (cy + (y + 0.5 - cy) * 1.02) * k))]);
+  const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+  let OW = Math.max(dist(Q[0], Q[1]), dist(Q[3], Q[2])), OH = Math.max(dist(Q[0], Q[3]), dist(Q[1], Q[2]));
+  const esc = Math.min(1, MAX_SIDE / Math.max(OW, OH)); OW = Math.round(OW * esc); OH = Math.round(OH * esc);
+  const H = homografia([[0, 0], [OW, 0], [OW, OH], [0, OH]], Q); if (!H) return null;
+  const SW = fuente.width, SH = fuente.height, sd = fuente.getContext("2d").getImageData(0, 0, SW, SH).data;
+  const out = lienzo(OW, OH), od = out.getContext("2d").createImageData(OW, OH), o = od.data;
+  for (let v = 0; v < OH; v++) for (let u = 0; u < OW; u++) {
+    const z = H[6] * u + H[7] * v + 1, x = (H[0] * u + H[1] * v + H[2]) / z, y = (H[3] * u + H[4] * v + H[5]) / z;
+    const x0 = Math.min(SW - 2, Math.max(0, x | 0)), y0 = Math.min(SH - 2, Math.max(0, y | 0)), fx = Math.min(1, Math.max(0, x - x0)), fy = Math.min(1, Math.max(0, y - y0));
+    const i00 = (y0 * SW + x0) * 4, i10 = i00 + 4, i01 = i00 + SW * 4, i11 = i01 + 4, j = (v * OW + u) * 4;
+    for (let ch = 0; ch < 3; ch++) o[j + ch] = (sd[i00 + ch] * (1 - fx) + sd[i10 + ch] * fx) * (1 - fy) + (sd[i01 + ch] * (1 - fx) + sd[i11 + ch] * fx) * fy;
+    o[j + 3] = 255;
+  }
+  out.getContext("2d").putImageData(od, 0, 0);
+  return out;
+}
+/** Si la foto trae mesa o fondo alrededor de la hoja, recorta a la hoja (más resolución para la letra). Conservador: si duda, no recorta. */
+function recortarPapel(src) {
+  const { g, w, h } = grises(src, 400), tot = w * h, th = otsu(g);
+  const filas = new Float32Array(h), cols = new Float32Array(w);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (g[y * w + x] > th) { filas[y]++; cols[x]++; }
+  const rango = (a, n) => { let i = 0, j = a.length - 1; while (i < j && a[i] < n * 0.3) i++; while (j > i && a[j] < n * 0.3) j--; return [i, j]; };
+  const [y0, y1] = rango(filas, w), [x0, x1] = rango(cols, h);
+  const area = (x1 - x0 + 1) * (y1 - y0 + 1);
+  if (area > tot * 0.88 || area < tot * 0.2) return null;
+  let dentro = 0, nd = 0, fuera = 0, claros = 0;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const v = g[y * w + x];
+    if (x >= x0 && x <= x1 && y >= y0 && y <= y1) { dentro += v; nd++; if (v > th) claros++; } else fuera += v;
+  }
+  if (dentro / nd - fuera / (tot - nd) < 45 || claros / nd < 0.6) return null;
+  const sw = src.width, sh = src.height, k = sw / w, m = 0.025;
+  const X0 = Math.max(0, (x0 - w * m) * k), Y0 = Math.max(0, (y0 - h * m) * k), X1 = Math.min(sw, (x1 + 1 + w * m) * k), Y1 = Math.min(sh, (y1 + 1 + h * m) * k);
+  const c = lienzo(X1 - X0, Y1 - Y0); c.getContext("2d").drawImage(src, X0, Y0, X1 - X0, Y1 - Y0, 0, 0, c.width, c.height);
+  return c;
+}
 /** Inclinación del texto en grados (horario positivo). Para enderezar: girarLibre(c, -angulo). */
 function inclinacion(src) {
   const { g, w, h } = grises(src, 800);
@@ -330,7 +468,8 @@ function realzar(src) {
   const w = src.width, h = src.height;
   const datos = src.getContext("2d").getImageData(0, 0, w, h), p = datos.data;
   const g = new Float32Array(w * h);
-  for (let i = 0, j = 0; j < g.length; i += 4, j++) g[j] = 0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2];
+  // Canal más oscuro en vez de luminancia: la tinta azul o roja clara no se pierde al pasar a grises
+  for (let i = 0, j = 0; j < g.length; i += 4, j++) g[j] = 0.5 * (0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2]) + 0.5 * Math.min(p[i], p[i + 1], p[i + 2]);
   // Fondo = el papel: máximo por bloques, suavizado y estirado al tamaño completo
   const b = Math.max(8, Math.round(Math.max(w, h) / 48)), bw = Math.ceil(w / b), bh = Math.ceil(h / b);
   const mx = new Float32Array(bw * bh);
@@ -367,17 +506,24 @@ function realzar(src) {
   const c = lienzo(w, h); c.getContext("2d").putImageData(out, 0, 0);
   return c;
 }
+function recorte(c, x0, y0, x1, y1) {
+  const t = lienzo(x1 - x0, y1 - y0); t.getContext("2d").drawImage(c, x0, y0, x1 - x0, y1 - y0, 0, 0, t.width, t.height); return t;
+}
 /** Corta en franjas horizontales con un poco de traslape, para ver letra chica con más detalle. */
 function franjas(c, n) {
   const res = [], ov = 0.06;
-  for (let i = 0; i < n; i++) {
-    const y0 = Math.max(0, Math.floor((i / n - ov) * c.height)), y1 = Math.min(c.height, Math.ceil(((i + 1) / n + ov) * c.height));
-    const t = lienzo(c.width, y1 - y0); t.getContext("2d").drawImage(c, 0, y0, c.width, y1 - y0, 0, 0, c.width, y1 - y0);
-    res.push(t);
-  }
+  for (let i = 0; i < n; i++) res.push(recorte(c, 0, Math.max(0, Math.floor((i / n - ov) * c.height)), c.width, Math.min(c.height, Math.ceil(((i + 1) / n + ov) * c.height))));
+  return res;
+}
+/** Cuatro cuadrantes con traslape: el doble de detalle que la página completa (para la segunda lectura). */
+function cuadrantes(c) {
+  const W = c.width, H = c.height, ox = W * 0.06, oy = H * 0.06, res = [];
+  for (const [fy, fx] of [[0, 0], [0, 1], [1, 0], [1, 1]])
+    res.push(recorte(c, Math.max(0, Math.floor(fx * W / 2 - ox)), Math.max(0, Math.floor(fy * H / 2 - oy)), Math.min(W, Math.ceil((fx + 1) * W / 2 + ox)), Math.min(H, Math.ceil((fy + 1) * H / 2 + oy))));
   return res;
 }
 const aBlob = (c, q = 0.9) => new Promise((ok, mal) => c.toBlob((b) => b ? ok(b) : mal(new Error("blob")), "image/jpeg", q));
+const aEnvio = (c) => aBlob(paraEnviar(c), 0.88);
 async function cargarImagen(file) {
   const url = URL.createObjectURL(file);
   try { const img = new Image(); img.src = url; await img.decode(); return img; }  // el navegador aplica la orientación EXIF
@@ -398,43 +544,289 @@ async function detectarGiro(c) {
   } catch (e) { if (esFatal(e)) throw e; return 0; }
 }
 
-/** Prepara una foto o página: orienta, endereza, realza y corta. */
-async function prepararPagina(src, { orientar, maxFranjas, notas }) {
+/** Prepara una foto o página escaneada: recorta el fondo, orienta, endereza, realza y corta en franjas o cuadrantes. */
+async function prepararPagina(src, { orientar = false, recortar = false, nFranjas = 0, zoom = false, notas, pref = "" }) {
   let c = escalado(src, MAX_SIDE);
+  if (recortar) {
+    const lado = Math.max(src.naturalWidth || src.width, src.naturalHeight || src.height);
+    const r = aplanarHoja(c, lado > MAX_SIDE ? escalado(src, Math.min(lado, 4800)) : c);   // recorta de la foto con más resolución
+    if (r) { c = r; notas.push(pref + "corregí la perspectiva y recorté el fondo"); }
+    else { const r2 = recortarPapel(c); if (r2) { c = r2; notas.push(pref + "recorté el fondo alrededor del documento"); } }
+  }
   if (orientar) {
     const g = await detectarGiro(c);
-    if (g) { c = girar90(c, g); notas.push({ 90: "estaba de lado (la giré a la derecha)", 180: "estaba de cabeza (la volteé)", 270: "estaba de lado (la giré a la izquierda)" }[g]); }
+    if (g) { c = girar90(c, g); notas.push(pref + { 90: "estaba de lado (la giré a la derecha)", 180: "estaba de cabeza (la volteé)", 270: "estaba de lado (la giré a la izquierda)" }[g]); }
   }
   const ang = inclinacion(c);
-  if (Math.abs(ang) >= 0.5) { c = girarLibre(c, -ang); notas.push(`la enderecé ${Math.abs(ang).toFixed(1)}°`); }
+  if (Math.abs(ang) >= 0.5) { c = girarLibre(c, -ang); notas.push(pref + `la enderecé ${Math.abs(ang).toFixed(1)}°`); }
   const realzada = realzar(c);
-  const piezas = maxFranjas > 0 ? franjas(realzada, maxFranjas) : [];
-  return { color: c, piezas };
+  return { color: c, piezas: nFranjas > 0 ? franjas(realzada, nFranjas) : [], cuadrantes: zoom ? cuadrantes(realzada) : [] };
 }
 
 /* ============================================================
-   PDF
+   Formatos: foto (JPG, PNG, HEIC…), PDF, TIFF, Word, Excel, ZIP
    ============================================================ */
-async function leerPDF(file) {
-  if (!window.pdfjsLib) throw new Error("No se pudo cargar el lector de PDF. Recarga la página.");
-  let pdf;
-  try { pdf = await pdfjsLib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise; }
-  catch (e) { throw new Error(e?.name === "PasswordException" ? "El PDF tiene contraseña. Ábrelo, imprímelo como PDF sin contraseña y súbelo de nuevo." : "No se pudo abrir el PDF."); }
-  let texto = "";
-  const paginas = Math.min(pdf.numPages, 40);
-  for (let p = 1; p <= paginas; p++) {
-    const tc = await (await pdf.getPage(p)).getTextContent();
-    texto += `\n--- Página ${p} ---\n` + tc.items.map((it) => it.str + (it.hasEOL ? "\n" : " ")).join("");
+const LIBS = {
+  jszip: ["https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js", () => window.JSZip],
+  pako: ["https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js", () => window.pako],
+  utif: ["https://cdn.jsdelivr.net/npm/utif@3.1.0/UTIF.js", () => window.UTIF],
+  heic2any: ["https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js", () => window.heic2any],
+};
+const libsCargando = {};
+/** Carga una librería solo cuando hace falta (la mayoría de los archivos no la necesita). */
+function libreria(n) {
+  return libsCargando[n] ||= new Promise((ok, mal) => {
+    const [url, get] = LIBS[n]; if (get()) return ok(get());
+    const s = document.createElement("script"); s.src = url; s.async = true;
+    s.onload = () => get() ? ok(get()) : mal(new Error(n));
+    s.onerror = () => { delete libsCargando[n]; mal(new Error(n)); };
+    document.head.append(s);
+  });
+}
+const extension = (n) => (/\.([a-z0-9]{1,5})$/i.exec(n || "")?.[1] || "").toLowerCase();
+const natural = (a, b) => a.localeCompare(b, undefined, { numeric: true });
+/** Error que no se arregla reintentando (formato no soportado, archivo dañado). */
+const sinReintento = (m) => Object.assign(new Error(m), { sinReintento: true });
+function tipoPorNombre(file) {
+  const e = extension(file.name), t = (file.type || "").toLowerCase();
+  if (e === "pdf" || t === "application/pdf") return "pdf";
+  if (/^(docx?|odt|rtf)$/.test(e) || /word/.test(t)) return "doc";
+  if (/^(xlsx?|ods|csv)$/.test(e) || /sheet|excel/.test(t)) return "xls";
+  if (e === "zip" || /zip/.test(t)) return "zip";
+  return "img";
+}
+/** Detecta el formato real por los primeros bytes (no por la extensión, que a veces miente o no viene). */
+async function detectarFormato(file) {
+  const b = new Uint8Array(await file.slice(0, 1024).arrayBuffer()), a = String.fromCharCode(...b.subarray(0, 16)), ext = extension(file.name);
+  const hay = (s) => { outer: for (let i = 0; i + s.length <= b.length; i++) { for (let j = 0; j < s.length; j++) if (b[i + j] !== s.charCodeAt(j)) continue outer; return true; } return false; };
+  if (hay("%PDF")) return "pdf";
+  if (b[0] === 0xFF && b[1] === 0xD8 && b[2] === 0xFF) return "img";
+  if (a.startsWith("\x89PNG") || a.startsWith("GIF8") || (a.startsWith("RIFF") && a.slice(8, 12) === "WEBP") || (a.startsWith("BM") && /^(bmp|dib)$/.test(ext))) return "img";
+  if (a.slice(4, 8) === "ftyp") { const marca = a.slice(8, 12); return /^avi[fs]$/.test(marca) ? "img" : /^(hei[cmsx]|hev[cmsx]|mif1|msf1)$/.test(marca) ? "heic" : "video"; }
+  if (a.startsWith("II*\0") || a.startsWith("MM\0*")) return "tiff";
+  if (a.startsWith("PK\x03\x04")) return "zip";       // docx, xlsx, pptx y zip: se distinguen al abrirlo
+  if (b[0] === 0xD0 && b[1] === 0xCF && b[2] === 0x11 && b[3] === 0xE0) return "office_viejo";
+  if (/^(heic|heif)$/.test(ext)) return "heic";
+  if (/^(doc|xls|ppt)$/.test(ext)) return "office_viejo";
+  if (/^(mp4|mov|avi|3gp|mkv)$/.test(ext) || /^video\//.test(file.type)) return "video";
+  if (/^(txt|csv)$/.test(ext) || /^text\//.test(file.type)) return "texto";
+  return "desconocido";
+}
+async function abrirImagen(file, fmt) {
+  try { return await cargarImagen(file); } catch {}                       // JPG, PNG, WebP, GIF, BMP, AVIF (y HEIC en Safari)
+  if (fmt === "heic") {
+    let jpg;
+    try { const h = await libreria("heic2any"); const r = await h({ blob: file, toType: "image/jpeg", quality: 0.92 }); jpg = Array.isArray(r) ? r[0] : r; }
+    catch { throw sinReintento("Es una foto HEIC de iPhone y este navegador no la pudo convertir. En el iPhone compártela como JPG (por ejemplo por WhatsApp) o activa Ajustes › Cámara › Formatos › «Más compatible», y súbela de nuevo."); }
+    return cargarImagen(jpg);
   }
-  const render = async (p) => {
-    const page = await pdf.getPage(p), vp0 = page.getViewport({ scale: 1 });
-    const scale = Math.min(3, 2000 / Math.max(vp0.width, vp0.height)), vp = page.getViewport({ scale });
-    const c = lienzo(vp.width, vp.height), x = c.getContext("2d");
-    x.fillStyle = "#fff"; x.fillRect(0, 0, c.width, c.height);
-    await page.render({ canvasContext: x, viewport: vp }).promise;
-    return c;
+  throw sinReintento(`No reconozco el formato de «${file.name}». Sube una foto (JPG, PNG, HEIC), un PDF, un Word (.docx), un Excel (.xlsx) o un ZIP con esos archivos.`);
+}
+async function abrirTIFF(file) {
+  try { return [await cargarImagen(file)]; } catch {}                     // Safari sí abre TIFF
+  let UTIF;
+  try { await libreria("pako").catch(() => null); UTIF = await libreria("utif"); }
+  catch { throw new Error("No se pudo cargar el lector de TIFF. Revisa tu conexión y toca Reintentar, o guarda el escaneo como PDF."); }
+  const buf = await file.arrayBuffer(), out = [];
+  let ifds; try { ifds = UTIF.decode(buf); } catch { throw sinReintento("El TIFF está dañado. Guárdalo como PDF o JPG y súbelo de nuevo."); }
+  for (const ifd of ifds.slice(0, 30)) {
+    try {
+      UTIF.decodeImage(buf, ifd, ifds);
+      if (!ifd.width || !ifd.height || Math.max(ifd.width, ifd.height) < 300) continue;   // miniaturas
+      const rgba = UTIF.toRGBA8(ifd), c = lienzo(ifd.width, ifd.height);
+      c.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(rgba.buffer, rgba.byteOffset, ifd.width * ifd.height * 4), ifd.width, ifd.height), 0, 0);
+      out.push(c);
+    } catch {}
+  }
+  if (!out.length) throw sinReintento("No pude leer las páginas del TIFF. Guárdalo como PDF o JPG y súbelo de nuevo.");
+  return out;
+}
+const xml = (s) => new DOMParser().parseFromString(s, "application/xml");
+/** Texto de un Word conservando renglones y tablas (celdas separadas con " | "). */
+function textoWord(doc) {
+  const out = [];
+  const linea = (p) => { let s = ""; for (const n of p.getElementsByTagName("*")) { if (n.tagName === "w:t") s += n.textContent; else if (n.tagName === "w:tab") s += "\t"; else if (n.tagName === "w:br") s += "\n"; } return s; };
+  const recorrer = (nodo) => {
+    for (const n of nodo.children) {
+      if (n.tagName === "w:p") out.push(linea(n));
+      else if (n.tagName === "w:tbl") for (const tr of n.getElementsByTagName("w:tr")) out.push([...tr.getElementsByTagName("w:tc")].map((tc) => [...tc.getElementsByTagName("w:p")].map(linea).join(" ").trim()).join(" | "));
+      else recorrer(n);
+    }
   };
-  return { texto, numPages: pdf.numPages, render };
+  recorrer(doc.documentElement);
+  return out.filter((l) => l.trim()).join("\n");
+}
+async function textoExcel(zip) {
+  const leer = async (n) => zip.file(n) ? xml(await zip.file(n).async("string")) : null;
+  const ss = [...((await leer("xl/sharedStrings.xml"))?.getElementsByTagName("si") || [])].map((si) => [...si.getElementsByTagName("t")].map((t) => t.textContent).join(""));
+  const nombres = [...((await leer("xl/workbook.xml"))?.getElementsByTagName("sheet") || [])].map((s) => s.getAttribute("name"));
+  let out = "";
+  for (const [i, n] of Object.keys(zip.files).filter((n) => /^xl\/worksheets\/sheet\d+\.xml$/.test(n)).sort(natural).entries()) {
+    out += `--- Hoja ${nombres[i] || i + 1} ---\n`;
+    for (const row of (await leer(n)).getElementsByTagName("row")) {
+      const celdas = [];
+      for (const c of row.getElementsByTagName("c")) {
+        const t = c.getAttribute("t"), v = c.getElementsByTagName("v")[0]?.textContent;
+        const val = t === "s" ? ss[+v] : t === "inlineStr" ? [...c.getElementsByTagName("t")].map((x) => x.textContent).join("") : v;
+        if (val != null && String(val).trim() !== "") celdas.push(`${c.getAttribute("r")}: ${val}`);
+      }
+      if (celdas.length) out += celdas.join(" | ") + "\n";
+      if (out.length > 100000) return out;
+    }
+  }
+  return out;
+}
+/** Word, Excel, PowerPoint o ZIP: texto + imágenes pegadas adentro (INE escaneada en un Word, por ejemplo). */
+async function abrirZip(item, notas) {
+  let JSZip;
+  try { JSZip = await libreria("jszip"); } catch { throw new Error("No se pudo cargar el lector de Word/Excel/ZIP. Revisa tu conexión y toca Reintentar."); }
+  let zip; try { zip = await JSZip.loadAsync(await item.file.arrayBuffer()); } catch { throw sinReintento("El archivo está dañado o incompleto. Descárgalo de nuevo y vuelve a subirlo."); }
+  const es = (p) => !!zip.file(p);
+  const clase = es("word/document.xml") ? "docx" : es("xl/workbook.xml") ? "xlsx" : es("ppt/presentation.xml") ? "pptx" : "zip";
+  if (clase === "zip") {
+    const archivos = [];
+    for (const e of Object.values(zip.files)) {
+      if (e.dir || /(^|\/)(__MACOSX|\.)/.test(e.name)) continue;
+      archivos.push(new File([await e.async("blob")], e.name.split("/").pop(), { type: "" }));
+      if (archivos.length >= 40) break;
+    }
+    if (!archivos.length) throw sinReintento("El ZIP está vacío.");
+    item.expandido = archivos;
+    return [];
+  }
+  const nombres = (re) => Object.keys(zip.files).filter((n) => re.test(n)).sort(natural);
+  let texto = "";
+  if (clase === "docx") for (const n of nombres(/^word\/(header\d*|document|footer\d*)\.xml$/)) texto += textoWord(xml(await zip.file(n).async("string"))) + "\n";
+  else if (clase === "xlsx") texto = await textoExcel(zip);
+  else for (const n of nombres(/^ppt\/slides\/slide\d+\.xml$/)) texto += [...xml(await zip.file(n).async("string")).getElementsByTagName("a:t")].map((t) => t.textContent).join(" ") + "\n";
+  const paginas = [];
+  if (texto.replace(/\s/g, "").length) paginas.push({ etiqueta: { docx: "texto del Word", xlsx: "celdas del Excel", pptx: "texto de la presentación" }[clase], texto: texto.trim(), clase: "digital" });
+  let i = 0, fallidas = 0;
+  for (const n of nombres(/^(word|xl|ppt)\/media\/[^/]+$/)) {
+    if (!/\.(png|jpe?g|jfif|gif|bmp|webp|tiff?)$/i.test(n)) { if (/\.(emf|wmf)$/i.test(n)) fallidas++; continue; }
+    let img; const blob = await zip.file(n).async("blob");
+    try { img = /\.tiff?$/i.test(n) ? (await abrirTIFF(new File([blob], n)))[0] : await cargarImagen(blob); } catch { fallidas++; continue; }
+    if (Math.max(img.naturalWidth || img.width, img.naturalHeight || img.height) < 250) continue;   // logos e íconos
+    paginas.push({ etiqueta: `imagen ${++i} que venía dentro del archivo`, img, clase: "foto" });
+    if (i >= 12) break;
+  }
+  if (i) notas.push(`traía ${i} imagen(es) adentro; las leí también`);
+  if (fallidas) notas.push(`${fallidas} imagen(es) en formato que no puedo abrir (EMF/WMF); si ahí viene un documento, guarda el archivo como PDF`);
+  if (!paginas.length) throw sinReintento("El archivo no trae texto ni imágenes que leer.");
+  return paginas;
+}
+/** ¿El texto extraído de un PDF es basura (fuentes sin mapa de caracteres)? */
+function textoBasura(t) {
+  if (t.length < 40) return false;
+  const buenos = (t.match(/[A-Za-z0-9ÁÉÍÓÚÜÑáéíóúüñ$.,:;/()\-%#@&*+'"]/g) || []).length;
+  const letras = (t.match(/[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]/g) || []).length, vocales = (t.match(/[AEIOUaeiouÁÉÍÓÚáéíóú]/g) || []).length;
+  return buenos / t.length < 0.75 || (letras > 40 && vocales / letras < 0.18);
+}
+/** PDF: texto exacto por página, valores de campos de formulario, y qué páginas hay que ver como imagen. */
+async function abrirPDF(item, notas) {
+  if (!window.pdfjsLib) throw new Error("No se pudo cargar el lector de PDF. Revisa tu conexión y recarga la página.");
+  let pdf;
+  try { pdf = await pdfjsLib.getDocument({ data: new Uint8Array(await item.file.arrayBuffer()), password: item.password || undefined }).promise; }
+  catch (e) {
+    if (e?.name === "PasswordException") throw Object.assign(new Error(item.password ? "Esa contraseña no abre el PDF." : "El PDF tiene contraseña."), { code: "pdf_password" });
+    throw sinReintento("No se pudo abrir el PDF (puede estar dañado o incompleto). Descárgalo de nuevo y vuelve a subirlo.");
+  }
+  if (item.password) notas.push("lo abrí con la contraseña");
+  const N = Math.min(pdf.numPages, 60), OPS = pdfjsLib.OPS, paginas = [];
+  if (pdf.numPages > N) notas.push(`tiene ${pdf.numPages} páginas; revisé las primeras ${N}`);
+  for (let p = 1; p <= N; p++) {
+    if (N > 3) paso(item, `Revisando página ${p} de ${N}…`);
+    const page = await pdf.getPage(p);
+    let texto = (await page.getTextContent()).items.map((it) => (it.str || "") + (it.hasEOL ? "\n" : " ")).join("");
+    const campos = (await page.getAnnotations().catch(() => [])).filter((a) => a.subtype === "Widget" && a.fieldValue != null && String(a.fieldValue).trim() !== "" && a.fieldValue !== "Off")
+      .map((a) => `${a.alternativeText || a.fieldName || "campo"}: ${Array.isArray(a.fieldValue) ? a.fieldValue.join(", ") : a.fieldValue}`);
+    let imgMax = 0;
+    const ops = await page.getOperatorList().catch(() => null);
+    if (ops) for (let i = 0; i < ops.fnArray.length; i++) {
+      const fn = ops.fnArray[i], a = ops.argsArray[i];
+      if (fn === OPS.paintImageXObject) imgMax = Math.max(imgMax, (a?.[1] || 0) * (a?.[2] || 0));
+      else if (fn === OPS.paintInlineImageXObject || fn === OPS.paintImageMaskXObject) imgMax = Math.max(imgMax, (a?.[0]?.width || 0) * (a?.[0]?.height || 0));
+    }
+    const util = texto.replace(/\s/g, "");
+    const conTexto = util.length > 150 && !textoBasura(util), escaneada = imgMax >= 500000 || !conTexto;
+    if (campos.length) texto += `\n[Campos llenados del formulario]\n${campos.join("\n")}`;
+    const render = async (lado) => {
+      const vp0 = page.getViewport({ scale: 1 }), scale = Math.min(4, lado / Math.max(vp0.width, vp0.height)), vp = page.getViewport({ scale });
+      const c = lienzo(vp.width, vp.height), x = c.getContext("2d");
+      x.fillStyle = "#fff"; x.fillRect(0, 0, c.width, c.height);
+      await page.render({ canvasContext: x, viewport: vp }).promise;
+      return c;
+    };
+    paginas.push({ etiqueta: `página ${p}`, p, texto: conTexto || campos.length ? texto : null, ocr: conTexto && escaneada, clase: escaneada ? "escaneo" : "digital", render, formato: p === 1 && !escaneada, campos: campos.length });
+  }
+  const nCampos = paginas.reduce((s, p) => s + p.campos, 0), nEsc = paginas.filter((p) => p.clase === "escaneo").length;
+  if (nCampos) notas.push(`traía ${nCampos} campo(s) de formulario llenados; los leí`);
+  if (nEsc && nEsc < paginas.length) notas.push(`${paginas.length - nEsc} página(s) digitales (texto exacto) y ${nEsc} escaneada(s) (leídas como imagen)`);
+  else if (nEsc) notas.push(`escaneado: leí ${nEsc} página(s) como imagen`);
+  else notas.push(`digital: leí el texto exacto de ${paginas.length} página(s)`);
+  return paginas;
+}
+/** Cualquier archivo → lista de páginas { etiqueta, texto?, img? | render?, clase: "foto" | "escaneo" | "digital" }. */
+async function abrirArchivo(item, notas) {
+  const fmt = await detectarFormato(item.file);
+  item.kind = fmt === "pdf" ? "pdf" : ["zip", "office_viejo", "texto"].includes(fmt) ? (tipoPorNombre(item.file) === "img" ? "zip" : tipoPorNombre(item.file)) : "img";
+  switch (fmt) {
+    case "pdf": return abrirPDF(item, notas);
+    case "tiff": return (await abrirTIFF(item.file)).map((img, i, a) => ({ etiqueta: a.length > 1 ? `página ${i + 1}` : "imagen", img, clase: "escaneo" }));
+    case "zip": return abrirZip(item, notas);
+    case "texto": { const t = (await item.file.text()).slice(0, 100000); if (!t.trim()) throw sinReintento("El archivo de texto está vacío."); return [{ etiqueta: "texto del archivo", texto: t, clase: "digital" }]; }
+    case "office_viejo": throw sinReintento("Es un Word, Excel o PowerPoint antiguo (.doc, .xls o .ppt). Ábrelo y guárdalo como PDF (Archivo › Guardar como › PDF) o como .docx / .xlsx, y súbelo de nuevo.");
+    case "video": throw sinReintento("Es un video. Sube una foto, captura de pantalla o PDF del documento.");
+    default: return [{ etiqueta: "foto", img: await abrirImagen(item.file, fmt), clase: "foto" }];
+  }
+}
+
+/** Convierte las páginas en tandas para Claude: imágenes preparadas (≤ límite por llamada) + texto exacto. */
+async function armarTandas(item, paginas, notas) {
+  const maxImgs = Math.max(1, S.limits?.images?.maxCount ?? 1);
+  const digitales = paginas.filter((p) => p.texto && !p.ocr), ocr = paginas.filter((p) => p.texto && p.ocr);
+  let conImagen = paginas.filter((p) => p.clase !== "digital" || p.formato);
+  const MAX_PAG_IMG = 30;
+  if (conImagen.length > MAX_PAG_IMG) { notas.push(`solo leí como imagen las primeras ${MAX_PAG_IMG} páginas escaneadas`); conImagen = conImagen.slice(0, MAX_PAG_IMG); }
+  const vistas = conImagen.filter((p) => p.clase !== "digital").length;
+  const unidades = [];
+  for (const [i, pg] of conImagen.entries()) {
+    const varias = conImagen.length > 1, pref = varias ? `${pg.etiqueta}: ` : "";
+    paso(item, varias ? `Preparando ${pg.etiqueta} (${i + 1} de ${conImagen.length})…` : "Revisando la imagen…");
+    let src = pg.img || await pg.render(pg.clase === "digital" ? 1600 : 2800);
+    if (pg.clase === "digital") {          // página de PDF digital: solo para ver formato y logos; el texto exacto va aparte
+      if (!item.preview) item.preview = await vistaPrevia(src);
+      unidades.push({ imgs: [{ blob: await aEnvio(src), desc: `${pg.etiqueta} del PDF digital, para ver formato y logotipos (el texto exacto va abajo)`, principal: true }] });
+      continue;
+    }
+    const w = src.naturalWidth || src.width, h = src.naturalHeight || src.height;
+    if (Math.max(w, h) < 1000) { src = ampliar(src, 1600); notas.push(pref + "era de baja resolución; la amplié"); pg.baja = true; }
+    if (nitidez(src) < 2) { notas.push(pref + "se ve borrosa; la leí con más cuidado"); pg.borrosa = true; }
+    const nF = vistas === 1 ? (h >= w ? 3 : 2) : vistas <= 6 ? 2 : 0;
+    const prep = await prepararPagina(src, { orientar: pg.clase === "foto" || vistas <= 6 || i === 0, recortar: pg.clase === "foto",
+      nFranjas: Math.min(nF, maxImgs - 1), zoom: vistas === 1 && maxImgs >= 5, notas, pref });
+    if (!item.preview) item.preview = await vistaPrevia(prep.color);
+    const aviso = pg.borrosa || pg.baja ? " (se ve borrosa o es de baja resolución: lee con cuidado y pon en dudas lo que no sea claro)" : "";
+    const imgs = [{ blob: await aEnvio(prep.color), desc: `${pg.etiqueta}: completa, a color, ya enderezada${aviso}`, principal: true }];
+    for (const [k, c] of prep.piezas.entries()) imgs.push({ blob: await aEnvio(c), desc: `${pg.etiqueta}: franja ${k + 1} de ${prep.piezas.length} (de arriba a abajo), realzada en grises para letra chica o tenue` });
+    const zoom = prep.cuadrantes.length ? [imgs[0], ...await Promise.all(prep.cuadrantes.map(async (c, k) => ({ blob: await aEnvio(c),
+      desc: `${pg.etiqueta}: cuadrante ${["de arriba a la izquierda", "de arriba a la derecha", "de abajo a la izquierda", "de abajo a la derecha"][k]} ampliado al doble y realzado` })))] : null;
+    unidades.push({ imgs, zoom, dudosa: pg.borrosa || pg.baja });
+  }
+  // Agrupar: cada llamada lleva como máximo maxImgs imágenes y 8 páginas
+  const tandas = []; let t = null;
+  for (const u of unidades) {
+    const imgs = u.imgs.slice(0, maxImgs);
+    if (!t || t.imgs.length + imgs.length > maxImgs || t.paginas >= 8) { t = { imgs: [], paginas: 0, zoom: null, dudosa: false }; tandas.push(t); }
+    t.imgs.push(...imgs); t.paginas++; t.dudosa ||= !!u.dudosa;
+    if (u.zoom && unidades.length === 1) t.zoom = u.zoom;
+  }
+  if (!tandas.length) tandas.push({ imgs: [], paginas: 0, zoom: null, dudosa: false });
+  const bloque = (lista) => lista.map((p) => `--- ${p.etiqueta} ---\n${p.texto}`).join("\n");
+  tandas[0].texto = [digitales.length ? `TEXTO EXACTO (extraído del archivo digital; los números y nombres de aquí son exactos):\n<<<\n${bloque(digitales).slice(0, 110000)}\n>>>` : "",
+    ocr.length ? `TEXTO DE OCR DEL ESCÁNER (puede traer errores; confírmalo con las imágenes):\n<<<\n${bloque(ocr).slice(0, 40000)}\n>>>` : ""].filter(Boolean).join("\n\n");
+  item.textoExacto = digitales.filter((p) => p.clase === "digital").map((p) => p.texto).join("\n");
+  return tandas;
 }
 
 /* ============================================================
@@ -481,6 +873,23 @@ Cómo leer letra difícil:
 - En correos, el usuario suele parecerse al nombre de la persona: úsalo para desempatar.
 - NUNCA inventes. Si algo es ilegible o no aparece, pon null. Si lo leíste pero no estás seguro, ponlo y agrégalo a "dudas" con el campo y las alternativas (ej. "correo: jperez71@gmail.com o jperez77@gmail.com").
 
+Formularios llenados a mano (solicitudes):
+- Separa la ETIQUETA impresa del VALOR escrito: el valor va a la derecha, debajo o sobre la línea o recuadro de su etiqueta. Nunca copies la etiqueta como valor ni tomes el valor del renglón de al lado.
+- Si el formato trae un recuadro por letra o número (cuadritos), lee un carácter por recuadro y júntalos.
+- Si algo está tachado o sobrescrito, usa lo que quedó al final, no lo tachado; si no se sabe cuál vale, ponlo en "dudas".
+- Mucha gente escribe en LETRA DE MOLDE mayúscula: el correo devuélvelo en minúsculas; los nombres, como vienen.
+- Celular: 10 dígitos. Quita espacios, guiones, paréntesis, "+52", "044" o "045". Toma el que diga celular, móvil o WhatsApp, no el de casa, oficina o referencias. Las ladas sirven para revisar (55 y 56 CDMX y zona metropolitana, 33 Guadalajara, 81 Monterrey), nunca para inventar dígitos.
+- Correo: respeta puntos, guiones, guion bajo y números. Una "@" mal hecha puede parecer una "a" encerrada, "(a)" o "Q". Si el usuario lleva un año o día (ej. lupita88) y hay fecha de nacimiento, úsala solo para desempatar un dígito dudoso y anótalo en "dudas".
+- Domicilio: abreviaturas comunes Av., C., Calz., Priv., Cda., And., Mz./Manz. (manzana), Lt. (lote), Edif., Depto., Int., Ext., S/N (sin número), Col., Fracc., U.H. Copia el domicilio como viene; no completes ni corrijas calles ni colonias.
+- CURP: 18 caracteres = 4 letras + 6 dígitos (AAMMDD de nacimiento) + H o M + 2 letras del estado + 3 consonantes + 1 letra o dígito + 1 dígito. Usa esa estructura para decidir si un carácter dudoso es letra o número (en las posiciones 5 a 10 solo hay dígitos: O→0, I→1, S→5, B→8).
+- Números a mano: el 1 con "gancho" parece 7 sin raya; muchos cruzan el 7; un 4 cerrado parece 9; el 0 puede llevar diagonal; un 5 apurado parece S y un 2 parece Z.
+
+Montos y fechas:
+- En México los montos usan coma de miles y punto decimal (31,250.40). Un "-", "CR" o "DB" junto al número indica signo o tipo; los totales del resumen van sin signo.
+- Fechas como "14/07/1988", "14-JUL-88" o "14 de julio de 1988" → 1988-07-14. Meses: ENE FEB MAR ABR MAY JUN JUL AGO SEP OCT NOV DIC.
+- En Excel una fecha puede venir como número de serie (ej. 45231 = días desde 1899-12-30); conviértela.
+- Si recibes texto exacto extraído del archivo, úsalo para números y nombres (es exacto) y las imágenes para entender el formato; si recibes texto de OCR, confírmalo con las imágenes.
+
 Por tipo:
 - INE: nombre completo (nombre(s) y apellidos en orden natural), fecha de nacimiento, CURP, domicilio y año de vigencia (ej. "VIGENCIA 2021-2031" -> 2031). Si el domicilio no trae calle, calle_numero = null.
 - Estado de cuenta: del RESUMEN del periodo copia, tal como están impresos: saldo inicial/anterior, total de depósitos/abonos, total de retiros/cargos y saldo final. No los calcules tú. cuenta_terminacion = últimos 4 dígitos de la cuenta o CLABE. evidencia_total = copia LITERAL del renglón donde viene el total de depósitos/abonos. suma_abonos_movimientos solo si ves toda la tabla de movimientos; si no, null. periodo_fin = fecha de corte.
@@ -490,14 +899,15 @@ Por tipo:
 - Comprobante de domicilio: emisor, titular, domicilio (calle y número, colonia, CP, municipio/estado) y fecha de emisión.
 - Fechas en formato AAAA-MM-DD. Montos como número sin $ ni comas (ej. 45230.5).
 
-Responde SOLO con JSON con esta forma exacta (en cada documento llena solo la sección de su tipo; las demás van en null):
-{"documentos":[{"tipo":"ine","descripcion":"INE frente","legible":true,
-"ine":{"nombre_completo":null,"fecha_nacimiento":null,"curp":null,"calle_numero":null,"colonia":null,"cp":null,"municipio_estado":null,"vigencia":null},
-"estado_cuenta":{"banco":null,"titular":null,"cuenta_terminacion":null,"periodo_inicio":null,"periodo_fin":null,"saldo_inicial":null,"total_depositos_abonos":null,"total_retiros_cargos":null,"saldo_final":null,"evidencia_total":null,"suma_abonos_movimientos":null},
-"solicitud":{"nombre_completo":null,"correo":null,"telefono_celular":null,"calle_numero":null,"colonia":null,"cp":null,"municipio_estado":null},
-"cotizacion":{"marca":null,"modelo":null,"anio":null,"precio":null,"cliente_nombre":null},
-"comprobante_domicilio":{"emisor":null,"titular":null,"calle_numero":null,"colonia":null,"cp":null,"municipio_estado":null,"fecha_emision":null},
-"dudas":[]}]}`;
+Responde SOLO con JSON. En cada documento incluye ÚNICAMENTE la sección de su tipo (omite las de los otros tipos) y usa null en lo que no aparezca. Forma:
+{"documentos":[{"tipo":"solicitud","descripcion":"Solicitud NR Finance llenada a mano","legible":true,"solicitud":{"nombre_completo":null,"correo":null,"telefono_celular":null,"calle_numero":null,"colonia":null,"cp":null,"municipio_estado":null},"dudas":[]}]}
+Campos de cada sección:
+"ine":{"nombre_completo":null,"fecha_nacimiento":null,"curp":null,"calle_numero":null,"colonia":null,"cp":null,"municipio_estado":null,"vigencia":null}
+"estado_cuenta":{"banco":null,"titular":null,"cuenta_terminacion":null,"periodo_inicio":null,"periodo_fin":null,"saldo_inicial":null,"total_depositos_abonos":null,"total_retiros_cargos":null,"saldo_final":null,"evidencia_total":null,"suma_abonos_movimientos":null}
+"solicitud":{"nombre_completo":null,"correo":null,"telefono_celular":null,"calle_numero":null,"colonia":null,"cp":null,"municipio_estado":null}
+"cotizacion":{"marca":null,"modelo":null,"anio":null,"precio":null,"cliente_nombre":null}
+"comprobante_domicilio":{"emisor":null,"titular":null,"calle_numero":null,"colonia":null,"cp":null,"municipio_estado":null,"fecha_emision":null}
+Para "otro" no incluyas sección. Si unas páginas solo continúan un documento que empieza en otra parte del archivo (ej. hojas de movimientos sin el resumen), devuélvelas con "descripcion":"Continuación de …" y solo los datos que se vean.`;
 
 const NUL = (t) => ({ anyOf: [{ type: t }, { type: "null" }] });
 const OBJ = (props) => ({ type: "object", additionalProperties: false, required: Object.keys(props), properties: props });
@@ -521,6 +931,7 @@ SEGUNDA REVISIÓN. Otra lectura de este mismo archivo dio el JSON de abajo, pero
 ${problemas.map((p) => "- " + p).join("\n")}
 
 No te fíes de esa lectura: vuelve a leer TODO desde las imágenes/texto, carácter por carácter, y devuelve tu propia extracción completa con la misma forma JSON.
+Si recibes cuadrantes ampliados de la página, úsalos para leer el detalle letra por letra.
 Si un problema dice "falta", ese dato no se encontró: búscalo minuciosamente con todas sus etiquetas posibles, en todas las páginas, encabezados, pies, márgenes y recuadros. Si de verdad no aparece, déjalo en null. Si un campo sigue dudoso, déjalo en "dudas" con las alternativas.
 
 Lectura anterior:
@@ -531,9 +942,64 @@ ${JSON.stringify(previo)}`;
    ============================================================ */
 const EMAIL_RE = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
 const CURP_RE = /^[A-Z]{4}\d{6}[HMX][A-Z]{5}[A-Z0-9]\d$/;
+/* CURP: dígito verificador oficial (RENAPO) y claves de estado */
+const CURP_DIC = "0123456789ABCDEFGHIJKLMNÑOPQRSTUVWXYZ";
+const CURP_EDOS = new Set("AS BC BS CC CL CM CS CH DF DG GT GR HG JC MC MN MS NT NL OC PL QT QR SP SL SR TC TS TL VZ YN ZS NE".split(" "));
+const digitoCurp = (c) => { let s = 0; for (let i = 0; i < 17; i++) s += CURP_DIC.indexOf(c[i]) * (18 - i); return (10 - (s % 10)) % 10; };
+const curpValida = (c) => CURP_RE.test(c || "") && CURP_EDOS.has(c.slice(11, 13)) && +c[17] === digitoCurp(c);
+const A_LETRA = { 0: "O", 1: "I", 2: "Z", 4: "A", 5: "S", 6: "G", 7: "T", 8: "B" }, A_DIGITO = { O: "0", D: "0", Q: "0", U: "0", I: "1", L: "1", Z: "2", S: "5", B: "8", G: "6", T: "7", A: "4" };
+/** Corrige confusiones letra/número según la posición (en la CURP cada posición es solo letra o solo número). */
+function repararCurp(c) {
+  const r = [...c].map((ch, i) => (i <= 3 || (i >= 10 && i <= 15)) ? (A_LETRA[ch] ?? ch) : ((i >= 4 && i <= 9) || i === 17) ? (A_DIGITO[ch] ?? ch) : ch);
+  if (/[A-Z]/.test(r[16]) && +r.slice(4, 6).join("") > new Date().getFullYear() % 100 && A_DIGITO[r[16]]) r[16] = A_DIGITO[r[16]];   // nacido en 19xx: ahí va dígito
+  return r.join("");
+}
+/* Código postal → estado (SEPOMEX: los dos primeros dígitos) */
+const CP_EDO = [[1, 16, "CDMX"], [20, 20, "AGS"], [21, 22, "BC"], [23, 23, "BCS"], [24, 24, "CAMP"], [25, 27, "COAH"], [28, 28, "COL"], [29, 30, "CHIS"], [31, 33, "CHIH"],
+  [34, 35, "DGO"], [36, 38, "GTO"], [39, 41, "GRO"], [42, 43, "HGO"], [44, 49, "JAL"], [50, 57, "MEX"], [58, 61, "MICH"], [62, 62, "MOR"], [63, 63, "NAY"], [64, 67, "NL"],
+  [68, 71, "OAX"], [72, 75, "PUE"], [76, 76, "QRO"], [77, 77, "QROO"], [78, 79, "SLP"], [80, 82, "SIN"], [83, 85, "SON"], [86, 86, "TAB"], [87, 89, "TAMPS"], [90, 90, "TLAX"],
+  [91, 96, "VER"], [97, 97, "YUC"], [98, 99, "ZAC"]];
+const NOMBRE_EDO = { CDMX: "Ciudad de México", AGS: "Aguascalientes", BC: "Baja California", BCS: "Baja California Sur", CAMP: "Campeche", COAH: "Coahuila", COL: "Colima",
+  CHIS: "Chiapas", CHIH: "Chihuahua", DGO: "Durango", GTO: "Guanajuato", GRO: "Guerrero", HGO: "Hidalgo", JAL: "Jalisco", MEX: "Estado de México", MICH: "Michoacán",
+  MOR: "Morelos", NAY: "Nayarit", NL: "Nuevo León", OAX: "Oaxaca", PUE: "Puebla", QRO: "Querétaro", QROO: "Quintana Roo", SLP: "San Luis Potosí", SIN: "Sinaloa",
+  SON: "Sonora", TAB: "Tabasco", TAMPS: "Tamaulipas", TLAX: "Tlaxcala", VER: "Veracruz", YUC: "Yucatán", ZAC: "Zacatecas" };
+const EDO_RE = [["AGS", /\bAGUASCALIENTES\b|\bAGS\b/], ["BCS", /\bBAJA CALIFORNIA SUR\b|\bB\.? ?C\.? ?S\b/], ["BC", /\bBAJA CALIFORNIA\b(?! SUR)/], ["CAMP", /\bCAMPECHE\b|\bCAMP\b/],
+  ["COAH", /\bCOAHUILA\b|\bCOAH\b/], ["COL", /\bCOLIMA\b/], ["CHIS", /\bCHIAPAS\b|\bCHIS\b/], ["CHIH", /\bCHIHUAHUA\b|\bCHIH\b/], ["DGO", /\bDURANGO\b|\bDGO\b/],
+  ["GTO", /\bGUANAJUATO\b|\bGTO\b/], ["GRO", /\bGUERRERO\b|\bGRO\b/], ["HGO", /\bHIDALGO\b|\bHGO\b/], ["JAL", /\bJALISCO\b|\bJAL\b/], ["MICH", /\bMICHOACAN\b|\bMICH\b/],
+  ["MOR", /\bMORELOS\b|\bMOR\b/], ["NAY", /\bNAYARIT\b|\bNAY\b/], ["NL", /\bNUEVO LEON\b|\bN\.? ?L\b/], ["OAX", /\bOAXACA\b|\bOAX\b/], ["PUE", /\bPUEBLA\b|\bPUE\b/],
+  ["QROO", /\bQUINTANA ROO\b|\bQ\.? ?ROO\b/], ["QRO", /\bQUERETARO\b|\bQRO\b/], ["SLP", /\bSAN LUIS POTOSI\b|\bS\.? ?L\.? ?P\b/], ["SIN", /\bSINALOA\b/], ["SON", /\bSONORA\b/],
+  ["TAB", /\bTABASCO\b|\bTAB\b/], ["TAMPS", /\bTAMAULIPAS\b|\bTAMPS\b/], ["TLAX", /\bTLAXCALA\b|\bTLAX\b/], ["VER", /\bVERACRUZ\b|\bVER\b/], ["YUC", /\bYUCATAN\b|\bYUC\b/],
+  ["ZAC", /\bZACATECAS\b|\bZAC\b/]];
+const ALCALDIAS = /\b(IZTAPALAPA|COYOACAN|TLALPAN|GUSTAVO A\.? MADERO|AZCAPOTZALCO|IZTACALCO|TLAHUAC|XOCHIMILCO|MILPA ALTA|MAGDALENA CONTRERAS|CUAJIMALPA)\b/;
+const plano = (s) => (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+function estadoDeCp(cp) { const n = +String(cp).slice(0, 2); return CP_EDO.find(([a, b]) => n >= a && n <= b)?.[2] || null; }
+/** Estado que menciona un texto de domicilio; null si no menciona ninguno o es ambiguo. */
+function estadoDeTexto(t) {
+  let s = plano(t);
+  const cdmx = /\bCDMX\b|\bC\.D\.M\.X\b|CIUDAD DE MEXICO|\bCD\.? DE MEXICO|\bD\.? ?F\b|DISTRITO FEDERAL/.test(s);
+  s = s.replace(/CIUDAD DE MEXICO|\bCD\.? DE MEXICO|MEXICO,? D\.? ?F/g, " ")    // nombres de próceres que no son el estado
+    .replace(/MIGUEL HIDALGO|DOLORES HIDALGO|HIDALGO DEL PARRAL|CIUDAD HIDALGO|VICENTE GUERRERO|JOSE MARIA MORELOS|MORELOS Y PAVON|VALLE DE GUADALUPE/g, " ");
+  const hallados = new Set(EDO_RE.filter(([, re]) => re.test(s)).map(([e]) => e));
+  if (cdmx) hallados.add("CDMX");
+  if (/\bESTADO DE MEXICO\b|\bEDO\.? ?(DE )?MEX|\bEDOMEX\b|\bMEX\b|\bMEXICO\b/.test(s)) hallados.add("MEX");
+  if (!hallados.size && ALCALDIAS.test(s)) hallados.add("CDMX");
+  return hallados.size === 1 ? [...hallados][0] : null;
+}
+/** Problema si el CP no existe o no es del estado que dice el domicilio. */
+function cpNoCuadra(cp, muni) {
+  if (!/^\d{5}$/.test(cp || "")) return null;
+  const e1 = estadoDeCp(cp); if (!e1) return `el CP ${cp} no existe (ningún CP de México empieza con ${cp.slice(0, 2)})`;
+  const e2 = estadoDeTexto(muni);
+  return e2 && e2 !== e1 ? `el CP ${cp} es de ${NOMBRE_EDO[e1]}, pero el domicilio dice "${muni}" (${NOMBRE_EDO[e2]}); revisa el CP y el estado` : null;
+}
+const cuadraEdo = (e) => [e.saldo_inicial, e.total_depositos_abonos, e.total_retiros_cargos, e.saldo_final].every((x) => x != null)
+  ? Math.abs(e.saldo_inicial + e.total_depositos_abonos - e.total_retiros_cargos - e.saldo_final) <= Math.max(1, 0.005 * Math.max(Math.abs(e.saldo_final), 1)) : null;
 const TYPOS = { "gmial.com": "gmail.com", "gamil.com": "gmail.com", "gmail.con": "gmail.com", "gmai.com": "gmail.com", "gmail.com.mx": "gmail.com",
   "hotmial.com": "hotmail.com", "hotmail.con": "hotmail.com", "hotmal.com": "hotmail.com", "hotmai.com": "hotmail.com",
-  "outlok.com": "outlook.com", "outlook.con": "outlook.com", "yaho.com": "yahoo.com", "yahoo.con": "yahoo.com", "yahoo.com.mx.": "yahoo.com.mx" };
+  "outlok.com": "outlook.com", "outlook.con": "outlook.com", "yaho.com": "yahoo.com", "yahoo.con": "yahoo.com", "yahoo.com.mx.": "yahoo.com.mx",
+  "gmal.com": "gmail.com", "gmil.com": "gmail.com", "gmaill.com": "gmail.com", "gnail.com": "gmail.com", "gmail.co": "gmail.com", "gmail.cm": "gmail.com", "gmail.om": "gmail.com", "gmail": "gmail.com",
+  "hotmaill.com": "hotmail.com", "hotmil.com": "hotmail.com", "homail.com": "hotmail.com", "hotmail.co": "hotmail.com", "hotmail.cm": "hotmail.com", "hotmail": "hotmail.com",
+  "outlook.co": "outlook.com", "outlook": "outlook.com", "iclod.com": "icloud.com", "icloud.con": "icloud.com", "live.con": "live.com", "yahoo.com.m": "yahoo.com.mx", "prodigy.net.m": "prodigy.net.mx" };
 const SECCIONES = {
   ine: ["nombre_completo", "fecha_nacimiento", "curp", "calle_numero", "colonia", "cp", "municipio_estado", "vigencia"],
   estado_cuenta: ["banco", "titular", "periodo_inicio", "periodo_fin", "total_depositos_abonos", "suma_abonos_movimientos", "cuenta_terminacion", "saldo_inicial", "total_retiros_cargos", "saldo_final", "evidencia_total"],
@@ -547,7 +1013,7 @@ const CRITICOS = { ine: ["nombre_completo", "fecha_nacimiento", "curp", "calle_n
   comprobante_domicilio: ["titular", "calle_numero", "cp", "fecha_emision"] };
 const CLAVE = {"ine": ["nombre_completo", "fecha_nacimiento", "curp", "colonia", "cp"], "solicitud": ["nombre_completo", "correo", "telefono_celular", "calle_numero", "cp"], "cotizacion": ["modelo", "anio", "precio"], "estado_cuenta": ["banco", "titular", "periodo_fin", "saldo_inicial", "total_depositos_abonos", "total_retiros_cargos", "saldo_final"], "comprobante_domicilio": ["titular", "calle_numero", "cp", "fecha_emision"]};
 function faltantes(d) {
-  if (d.tipo === "otro" || !CLAVE[d.tipo] || (d.tipo === "ine" && /reverso/i.test(d.descripcion || ""))) return [];
+  if (d.tipo === "otro" || !CLAVE[d.tipo] || (d.tipo === "ine" && /reverso/i.test(d.descripcion || "")) || /^continuaci/i.test(d.descripcion || "")) return [];
   const sec = d[d.tipo];
   return sec ? CLAVE[d.tipo].filter((k) => sec[k] === null || sec[k] === undefined || sec[k] === "") : [...CLAVE[d.tipo]];
 }
@@ -592,9 +1058,15 @@ function validar(d) {
   if (d.ine) {
     const i = d.ine;
     if (i.curp) {
-      i.curp = i.curp.replace(/\s/g, "").toUpperCase();
-      if (!CURP_RE.test(i.curp)) p.push(`CURP "${i.curp}" no tiene formato válido`);
+      i.curp = i.curp.replace(/[\s-]/g, "").toUpperCase();
+      if (i.curp.length === 18 && !curpValida(i.curp)) {
+        const r = repararCurp(i.curp);
+        if (r !== i.curp && curpValida(r)) { p.push(`CURP: se leyó "${i.curp}" y la corregí a ${r} (confusión entre letra y número; así sí pasa el dígito verificador)`); i.curp = r; }
+      }
+      if (!CURP_RE.test(i.curp)) p.push(`CURP "${i.curp}" no tiene formato válido (debe ser 4 letras, 6 números, H o M, 5 letras, 1 letra o número y 1 número)`);
       else {
+        if (!CURP_EDOS.has(i.curp.slice(11, 13))) p.push(`CURP ${i.curp}: "${i.curp.slice(11, 13)}" no es una clave de estado válida; algún carácter está mal leído`);
+        else if (+i.curp[17] !== digitoCurp(i.curp)) p.push(`la CURP ${i.curp} no pasa el dígito verificador (con esos primeros 17 caracteres terminaría en ${digitoCurp(i.curp)}): algún carácter está mal leído`);
         const fc = fechaDeCurp(i.curp);
         if (i.fecha_nacimiento && fc !== i.fecha_nacimiento) p.push(`fecha de nacimiento ${i.fecha_nacimiento} no coincide con la CURP (${fc})`);
         else if (!i.fecha_nacimiento) i.fecha_nacimiento = fc;
@@ -608,13 +1080,19 @@ function validar(d) {
       if (edad < 18 || edad > 85) p.push(`la edad calculada (${edad} años) es poco común; revisa la fecha de nacimiento`);
     }
     if (i.vigencia && i.vigencia < new Date().getFullYear()) p.push(`la INE venció en ${i.vigencia}`);
+    if (i.cp && !/^\d{5}$/.test(i.cp.trim())) p.push(`CP de la INE "${i.cp}" no tiene 5 dígitos`);
+    else if (i.cp) { const x = cpNoCuadra(i.cp.trim(), i.municipio_estado); if (x) p.push(x); }
   }
   if (d.solicitud) {
     const s = d.solicitud;
     if (s.correo) {
       s.correo = s.correo.replace(/\s/g, "").toLowerCase();
+      s.correo = s.correo.replace(/,/g, ".").replace(/\.+$/, "").replace(/\.{2,}/g, ".");
       const at = s.correo.lastIndexOf("@");
-      if (at > 0) { const dom = s.correo.slice(at + 1); if (TYPOS[dom]) { p.push(`el correo decía "${dom}"; lo cambié a ${TYPOS[dom]}`); s.correo = s.correo.slice(0, at + 1) + TYPOS[dom]; } }
+      if (at > 0) {
+        const dom = s.correo.slice(at + 1), arreglo = TYPOS[dom] || (/\.con$/.test(dom) ? dom.replace(/\.con$/, ".com") : null);
+        if (arreglo) { p.push(`el correo decía "${dom}"; lo cambié a ${arreglo}`); s.correo = s.correo.slice(0, at + 1) + arreglo; }
+      }
       if (!EMAIL_RE.test(s.correo)) p.push(`correo "${s.correo}" no tiene formato válido`);
     }
     if (s.telefono_celular) {
@@ -622,9 +1100,14 @@ function validar(d) {
       if (dig.length === 12 && dig.startsWith("52")) dig = dig.slice(2);
       if (dig.length === 13 && dig.startsWith("521")) dig = dig.slice(3);
       s.telefono_celular = dig;
+      if (dig.length === 13 && /^04[45]/.test(dig)) dig = dig.slice(3);
+      s.telefono_celular = dig;
       if (dig.length !== 10) p.push(`celular "${dig}" no tiene 10 dígitos`);
+      else if (/^[01]/.test(dig)) p.push(`celular ${dig} empieza con ${dig[0]}; en México ningún número empieza así, revisa el primer dígito`);
+      else if (/^(\d)\1+$/.test(dig)) p.push(`celular ${dig} parece de relleno`);
     }
     if (s.cp && !/^\d{5}$/.test(s.cp.trim())) p.push(`CP "${s.cp}" no tiene 5 dígitos`);
+    else if (s.cp) { const x = cpNoCuadra(s.cp.trim(), s.municipio_estado); if (x) p.push(x); }
   }
   if (d.cotizacion) {
     const c = d.cotizacion, y = new Date().getFullYear();
@@ -634,13 +1117,14 @@ function validar(d) {
   if (d.comprobante_domicilio) {
     const c = d.comprobante_domicilio;
     if (c.cp && !/^\d{5}$/.test(c.cp.trim())) p.push(`CP del comprobante "${c.cp}" no tiene 5 dígitos`);
+    else if (c.cp) { const x = cpNoCuadra(c.cp.trim(), c.municipio_estado); if (x) p.push(x); }
     if (c.fecha_emision && !fechaValida(c.fecha_emision)) p.push(`fecha del comprobante "${c.fecha_emision}" no es válida`);
   }
   if (d.estado_cuenta) {
     const e = d.estado_cuenta;
     if (e.periodo_fin && !fechaValida(e.periodo_fin)) p.push(`fecha de corte "${e.periodo_fin}" no es válida`);
     if (e.total_depositos_abonos !== null && e.total_depositos_abonos < 0) p.push("el total de abonos salió negativo");
-    if (e.total_depositos_abonos === null && d.legible) p.push("no encontré el total de depósitos/abonos del resumen");
+    if (e.total_depositos_abonos === null && d.legible && !/^continuaci/i.test(d.descripcion || "")) p.push("no encontré el total de depósitos/abonos del resumen");
     const [si, ab, ca, sf] = [e.saldo_inicial, e.total_depositos_abonos, e.total_retiros_cargos, e.saldo_final];
     if ([si, ab, ca, sf].every((x) => x !== null && x !== undefined)) {
       const calc = si + ab - ca;
@@ -655,88 +1139,127 @@ function validar(d) {
 /* ============================================================
    Leer un archivo de principio a fin
    ============================================================ */
+/** Una llamada a Claude. Si la plataforma rechaza el tamaño, reintenta una sola vez con menos (solo páginas completas). */
+async function consultar(prompt, imgs, texto, extra = {}) {
+  const describir = (lista) => lista.length ? "\n\nIMÁGENES QUE RECIBES:\n" + lista.map((x, k) => `Imagen ${k + 1}: ${x.desc}.`).join("\n") : "";
+  const una = (lista, tx) => {
+    const opts = { modelTier: "complex", effort: "high", schema: ESQUEMA, ...extra };
+    if (lista.length) opts.images = lista.map((x) => x.blob);
+    return S.sample.json(prompt + describir(lista) + (tx ? "\n\n" + tx : ""), opts);
+  };
+  try { return normalizar(await una(imgs, texto)); }
+  catch (e) {
+    if (!["image_rejected", "prompt_too_large"].includes(e?.code)) throw e;
+    const menos = imgs.filter((x) => x.principal).slice(0, Math.max(1, Math.ceil(imgs.length / 2)));
+    if (menos.length === imgs.length && e.code === "image_rejected") throw e;
+    return normalizar(await una(menos, (texto || "").slice(0, 40000)));
+  }
+}
+/** Junta documentos partidos: "continuaciones" y el mismo estado de cuenta repartido entre partes del archivo. */
+function unirDocs(lista, nuevos) {
+  for (const d of nuevos) {
+    const ult = [...lista].reverse().find((x) => x.tipo === d.tipo);
+    const cont = /^continuaci/i.test(d.descripcion || "");
+    const e1 = ult?.estado_cuenta, e2 = d.estado_cuenta;
+    const mismoEdo = d.tipo === "estado_cuenta" && e1 && e2?.periodo_fin && e1.periodo_fin === e2.periodo_fin
+      && (!e1.cuenta_terminacion || !e2.cuenta_terminacion || e1.cuenta_terminacion === e2.cuenta_terminacion);
+    if (ult && d.tipo !== "otro" && ult[d.tipo] && (cont || mismoEdo)) {
+      for (const [k, v] of Object.entries(d[d.tipo] || {})) if (ult[d.tipo][k] == null && v != null) ult[d.tipo][k] = v;
+      ult.dudas = [...new Set(ult.dudas.concat(d.dudas))];
+      continue;
+    }
+    lista.push(d);
+  }
+  return lista;
+}
+/** Si dos lecturas no coinciden en un dato clave, se queda con la que pasa la verificación (CURP, correo, celular, CP, saldos). */
+function campoValido(k, v, sec) {
+  const s = String(v ?? "");
+  switch (k) {
+    case "curp": return curpValida(s.replace(/\s/g, "").toUpperCase());
+    case "correo": return EMAIL_RE.test(s.replace(/\s/g, "").toLowerCase());
+    case "telefono_celular": return /^[2-9]\d{9}$/.test(s.replace(/\D/g, "").replace(/^52(1)?(?=\d{10}$)/, ""));
+    case "cp": return /^\d{5}$/.test(s.trim()) && !cpNoCuadra(s.trim(), sec.municipio_estado);
+    case "fecha_nacimiento": return fechaValida(s) && (!sec.curp || !curpValida(sec.curp) || fechaDeCurp(sec.curp) === s);
+    default: return null;   // no hay forma automática de saber cuál es el bueno
+  }
+}
+function resolver(d1, d2, nuevos) {
+  const tipo = d2.tipo, s1 = d1[tipo], s2 = d2[tipo];
+  if (!s1 || !s2) return nuevos;
+  if (tipo === "estado_cuenta" && cuadraEdo(s1) === true && cuadraEdo(s2) === false) {
+    for (const k of ["saldo_inicial", "total_depositos_abonos", "total_retiros_cargos", "saldo_final"]) s2[k] = s1[k];
+    nuevos = nuevos.filter((m) => !/no cuadran/.test(m));
+    nuevos.push("los saldos de la 1ª lectura cuadran y los de la 2ª no; usé los de la 1ª");
+  }
+  for (const k of CRITICOS[tipo] || []) {
+    const a = s1[k], b = s2[k];
+    if (a === null || a === undefined || String(a) === String(b)) continue;
+    const okA = campoValido(k, a, s1), okB = b == null ? false : campoValido(k, b, s2);
+    if (okA === true && okB === false) {
+      nuevos = nuevos.filter((m) => b == null || !m.includes(String(b)));
+      s2[k] = a; nuevos.push(`${k.replace(/_/g, " ")}: 1ª lectura "${a}", 2ª "${b ?? "vacío"}"; usé la 1ª porque es la que pasa la verificación`);
+    } else nuevos.push(`${k.replace(/_/g, " ")}: 1ª lectura "${a}", 2ª lectura "${b ?? "vacío"}" (usé la 2ª${okB === true && okA === false ? ", que es la que pasa la verificación" : ""})`);
+  }
+  return nuevos;
+}
+async function leerTanda(item, t, i, n) {
+  const cab = `Archivo: "${item.name}"` + (n > 1 ? ` — parte ${i + 1} de ${n} (las otras partes del mismo archivo se leen aparte; si estas páginas continúan un documento que empezó en una parte anterior, pon en descripcion "Continuación de …")` : "") + "."
+    + (t.dudosa ? " Ojo: la imagen se ve borrosa o es de baja resolución; lee con cuidado." : "");
+  const lectura1 = await consultar(`${INSTRUCCIONES}\n\n${cab}`, t.imgs, t.texto);
+  const prob1 = lectura1.map((d) => validar(d));
+  const problemas = lectura1.flatMap((d, k) => prob1[k].concat(d.dudas).map((x) => `${ETIQ[d.tipo]}: ${x}`));
+  problemas.push(...lectura1.flatMap((d) => faltantes(d).map((k) => `${ETIQ[d.tipo]}: falta ${k.replace(/_/g, " ")}`)));   // búsqueda enfocada en lo que falta
+  if (lectura1.some((d) => !d.legible && d.tipo !== "otro")) problemas.push("la primera lectura dijo que es difícil de leer: léelo de nuevo con calma, usando las imágenes ampliadas");
+  if (!lectura1.length && n === 1) problemas.push("la primera lectura no encontró ningún documento: revisa con cuidado todas las imágenes y el texto");
+  const sinSegunda = () => { lectura1.forEach((d, k) => d.dudas = [...new Set(prob1[k].concat(d.dudas))]); return lectura1; };
+  if (!problemas.length || (lectura1.length && lectura1.every((d) => d.tipo === "otro"))) return sinSegunda();
+
+  // Segunda lectura independiente, enfocada en lo dudoso (con la página ampliada en cuadrantes si es una foto)
+  paso(item, n > 1 ? `Verificando parte ${i + 1} de ${n}…` : "Verificando datos dudosos…");
+  let lectura2;
+  try { lectura2 = await consultar(VERIFICAR(problemas, { documentos: lectura1 }) + `\n\n${cab}`, t.zoom || t.imgs, t.texto, { cache: false }); }
+  catch (e) { if (esFatal(e)) throw e; }
+  if (!lectura2?.length) return sinSegunda();
+  for (const d of lectura2) {
+    const par = lectura1.filter((x) => x.tipo === d.tipo)[lectura2.filter((x) => x.tipo === d.tipo).indexOf(d)];
+    let nuevos = validar(d).concat(d.dudas);
+    if (par) nuevos = resolver(par, d, nuevos);
+    d.dudas = [...new Set(nuevos)];
+  }
+  // Si la 2ª lectura omitió un documento que la 1ª sí encontró, se conserva
+  for (const tipo of new Set(lectura1.map((d) => d.tipo))) {
+    if (tipo === "otro") continue;
+    const a = lectura1.filter((x) => x.tipo === tipo), b = lectura2.filter((x) => x.tipo === tipo);
+    for (const d of a.slice(b.length)) { d.dudas = [...new Set(prob1[lectura1.indexOf(d)].concat(d.dudas, ["solo apareció en la primera lectura; revísalo"]))]; lectura2.push(d); }
+  }
+  return lectura2;
+}
 async function procesar(item) {
   const notas = item.ajustes = [];
   const maxImgs = S.limits?.images?.maxCount ?? 0;
   if (!S.sample || !maxImgs) throw Object.assign(new Error("Esta vista no puede enviar imágenes a Claude."), { code: "images_unavailable" });
-  let imagenes = [], descripcion = "", textoPDF = "";
-  const terminar = (docs) => {
-    if (textoPDF) for (const d of docs) {
-      const ab = d.estado_cuenta?.total_depositos_abonos;
-      if (d.tipo === "estado_cuenta" && ab != null && !montoEnTexto(ab, textoPDF)) d.dudas.push(`el total de abonos ${MXN.format(ab)} no aparece en el texto del PDF; revísalo`);
-    }
-    item.docs = docs;
-  };
-
-  if (item.kind === "pdf") {
-    paso(item, "Abriendo PDF…");
-    const pdf = await leerPDF(item.file);
-    const util = pdf.texto.replace(/\s|---|Página \d+/g, "").length;
-    if (util > 300) {                       // PDF digital del banco: el texto es exacto
-      textoPDF = pdf.texto.slice(0, 100000);
-      const p1 = await pdf.render(1);
-      item.preview = await vistaPrevia(p1);
-      imagenes = [await aBlob(escalado(p1, MAX_SIDE))];
-      descripcion = `Es un PDF digital de ${pdf.numPages} página(s). Abajo va su texto extraído (exacto) y la imagen 1 es la página 1 para ver el formato.`;
-      notas.push(`digital, leí el texto de ${Math.min(pdf.numPages, 40)} página(s)`);
-    } else {                                // PDF escaneado: tratar cada página como foto
-      const n = Math.min(pdf.numPages, Math.max(1, maxImgs));
-      for (let p = 1; p <= n; p++) {
-        paso(item, `Enderezando página ${p} de ${n}…`);
-        const pag = await prepararPagina(await pdf.render(p), { orientar: p === 1, maxFranjas: n === 1 ? Math.min(3, maxImgs - 1) : 0, notas });
-        if (p === 1) item.preview = await vistaPrevia(pag.color);
-        imagenes.push(await aBlob(pag.color), ...(await Promise.all(pag.piezas.map((c) => aBlob(c)))));
-      }
-      imagenes = imagenes.slice(0, maxImgs);
-      descripcion = n === 1
-        ? `Es un PDF escaneado de 1 página. Imagen 1: la página completa a color, ya enderezada. Las demás: la misma página en franjas de arriba a abajo, realzadas (grises, alto contraste) para ver letra chica.`
-        : `Es un PDF escaneado; te paso sus primeras ${n} páginas en orden, ya enderezadas.` + (pdf.numPages > n ? ` (El PDF tiene ${pdf.numPages} páginas; si falta el resumen dilo en "dudas".)` : "");
-      if (pdf.numPages > n) notas.push(`solo envié las primeras ${n} de ${pdf.numPages} páginas`);
-    }
-  } else {
-    paso(item, "Revisando la foto…");
-    const img = await cargarImagen(item.file);
-    const lado = Math.max(img.naturalWidth, img.naturalHeight);
-    if (lado < 600) throw new Error("La foto es muy chica. Mándala como archivo/documento, no como miniatura o captura recortada.");
-    if (nitidez(img) < 2) throw new Error("La foto está muy borrosa. Tómala de nuevo con buena luz y sin moverte.");
-    paso(item, "Revisando orientación y enderezando…");
-    const vertical = img.naturalHeight >= img.naturalWidth;
-    const pag = await prepararPagina(img, { orientar: true, maxFranjas: Math.min(vertical ? 3 : 2, maxImgs - 1), notas });
-    item.preview = await vistaPrevia(pag.color);
-    imagenes = [await aBlob(pag.color), ...(await Promise.all(pag.piezas.map((c) => aBlob(c))))];
-    descripcion = `Es una foto. Imagen 1: el documento completo a color, ya enderezado.` +
-      (pag.piezas.length ? ` Imágenes 2 a ${pag.piezas.length + 1}: el mismo documento en franjas de arriba a abajo, realzadas (grises, alto contraste, sin sombras) para leer letra chica o tenue.` : "");
+  S.alEsperar = (seg, st) => paso(item, st === 429 ? `Llegaste al límite por minuto de tu cuenta; sigo en ${seg} s…` : `La IA está saturada; reintento en ${seg} s…`);
+  paso(item, "Abriendo el archivo…");
+  const paginas = await abrirArchivo(item, notas);
+  if (item.expandido) {                    // ZIP: sus archivos se agregan a la lista y se leen por separado
+    const n = item.expandido.length; agregar(item.expandido, true); item.expandido = null;
+    notas.push(`traía ${n} archivo(s); los agregué a la lista`); item.docs = []; return;
   }
+  const tandas = await armarTandas(item, paginas, notas);
   render();
-
-  const base = `${INSTRUCCIONES}\n\nArchivo: "${item.name}". ${descripcion}` + (textoPDF ? `\n\nTEXTO DEL PDF:\n<<<\n${textoPDF}\n>>>` : "");
-  paso(item, "Leyendo con Claude…");
-  const lectura1 = normalizar(await S.sample.json(base, { images: imagenes, modelTier: "complex", effort: "high", schema: ESQUEMA }));
-  if (!lectura1.length) throw new Error("No encontré ningún documento en el archivo.");
-  const prob1 = lectura1.map((d) => validar(d));
-  const problemas = lectura1.flatMap((d, i) => prob1[i].concat(d.dudas).map((x) => `${ETIQ[d.tipo]}: ${x}`));
-  problemas.push(...lectura1.flatMap((d) => faltantes(d).map((k) => `${ETIQ[d.tipo]}: falta ${k.replace(/_/g, " ")}`)));   // búsqueda enfocada en lo que falta
-  const sinSegunda = () => { lectura1.forEach((d, i) => d.dudas = [...new Set(prob1[i].concat(d.dudas))]); terminar(lectura1); };
-  if (!problemas.length || lectura1.every((d) => d.tipo === "otro" || !d.legible)) { sinSegunda(); return; }
-
-  // Segunda lectura independiente, enfocada en lo dudoso
-  paso(item, "Verificando datos dudosos…");
-  let lectura2;
-  try {
-    const prompt = VERIFICAR(problemas, { documentos: lectura1 }) + `\n\nArchivo: "${item.name}". ${descripcion}` + (textoPDF ? `\n\nTEXTO DEL PDF:\n<<<\n${textoPDF}\n>>>` : "");
-    lectura2 = normalizar(await S.sample.json(prompt, { images: imagenes, modelTier: "complex", effort: "high", schema: ESQUEMA }));
-  } catch (e) { if (esFatal(e)) throw e; }
-  if (!lectura2?.length) { sinSegunda(); return; }
-  for (const d of lectura2) {
-    const nuevos = validar(d).concat(d.dudas);
-    const par = lectura1.filter((x) => x.tipo === d.tipo)[lectura2.filter((x) => x.tipo === d.tipo).indexOf(d)];
-    if (par && CRITICOS[d.tipo]) for (const k of CRITICOS[d.tipo]) {
-      const a = par[d.tipo]?.[k], b = d[d.tipo]?.[k];
-      if (a !== null && a !== undefined && String(a) !== String(b)) nuevos.push(`${k.replace(/_/g, " ")}: 1ª lectura "${a}", 2ª lectura "${b ?? "vacío"}" (usé la 2ª)`);
-    }
-    d.dudas = [...new Set(nuevos)];
+  let docs = [];
+  for (const [i, t] of tandas.entries()) {
+    paso(item, tandas.length > 1 ? `Leyendo con Claude, parte ${i + 1} de ${tandas.length}…` : "Leyendo con Claude…");
+    docs = unirDocs(docs, await leerTanda(item, t, i, tandas.length));
   }
-  terminar(lectura2);
+  if (!docs.length) throw new Error("No encontré ningún documento en el archivo. Si es foto, tómala de frente, con buena luz y que el documento llene la foto.");
+  if (item.kind === "pdf" && item.textoExacto) for (const d of docs) {    // comparación contra el texto exacto del PDF digital
+    const ab = d.estado_cuenta?.total_depositos_abonos;
+    if (d.tipo === "estado_cuenta" && ab != null && !montoEnTexto(ab, item.textoExacto)) d.dudas.push(`el total de abonos ${MXN.format(ab)} no aparece en el texto del PDF; revísalo`);
+  }
+  if (paginas.some((p) => p.borrosa || p.baja)) for (const d of docs) if (d.tipo !== "otro") d.dudas.push("la imagen se ve borrosa o es de baja resolución: confirma los datos con el original");
+  item.docs = docs;
 }
 async function vistaPrevia(c) { return URL.createObjectURL(await aBlob(escalado(c, 160), 0.7)); }
 function paso(item, t) { item.paso = t; render(); }
@@ -819,8 +1342,7 @@ function armarFicha() {
   // ---- verificaciones cruzadas: lo que se confirma va a "verificados", lo que no cuadra a "avisos" ----
   const verificados = [];
   const cerca = (a, b) => Math.abs(a - b) <= Math.max(1, 0.005 * Math.max(Math.abs(b), 1));
-  const cuadra = (e) => [e.saldo_inicial, e.total_depositos_abonos, e.total_retiros_cargos, e.saldo_final].every((x) => x != null)
-    ? cerca(e.saldo_inicial + e.total_depositos_abonos - e.total_retiros_cargos, e.saldo_final) : null;
+  const cuadra = cuadraEdo;
   const conSaldos = usados.filter((e) => cuadra(e) !== null);
   if (conSaldos.length && conSaldos.every((e) => cuadra(e)))
     verificados.push(conSaldos.length === usados.length ? (usados.length === 1 ? "Los saldos del estado de cuenta cuadran (inicial + abonos − cargos = final)." : `Los saldos cuadran en los ${usados.length} estados de cuenta (inicial + abonos − cargos = final).`)
@@ -854,8 +1376,10 @@ function armarFicha() {
     verificados.push("El titular de los estados de cuenta coincide con el cliente.");
   if (ine?.nombre_completo && sol?.nombre_completo && mismoNombre(ine.nombre_completo, sol.nombre_completo))
     verificados.push("El nombre de la solicitud coincide con la INE.");
-  if (ine?.curp && ine.fecha_nacimiento && fechaDeCurp(ine.curp) === ine.fecha_nacimiento && (!ine.nombre_completo || curpVsNombre(ine.curp, ine.nombre_completo)))
-    verificados.push(ine.nombre_completo ? "La CURP coincide con la fecha de nacimiento y el nombre." : "La CURP coincide con la fecha de nacimiento.");
+  if (ine?.curp && curpValida(ine.curp) && ine.fecha_nacimiento && fechaDeCurp(ine.curp) === ine.fecha_nacimiento && (!ine.nombre_completo || curpVsNombre(ine.curp, ine.nombre_completo)))
+    verificados.push(`La CURP es válida (dígito verificador correcto) y coincide con la fecha de nacimiento${ine.nombre_completo ? " y el nombre" : ""}.`);
+  if (D?.cp && /^\d{5}$/.test(D.cp.trim()) && estadoDeTexto(D.municipio_estado) && !cpNoCuadra(D.cp.trim(), D.municipio_estado))
+    verificados.push(`El código postal ${D.cp.trim()} corresponde al estado del domicilio (${NOMBRE_EDO[estadoDeCp(D.cp.trim())]}).`);
   if (ine?.vigencia && ine.vigencia >= new Date().getFullYear()) verificados.push(`La INE está vigente (hasta ${ine.vigencia}).`);
   if (ine?.cp && sol?.cp) {
     if (ine.cp.trim() !== sol.cp.trim()) avisos.push(`El CP de la solicitud (${sol.cp}) es distinto al de la INE (${ine.cp}); el cliente pudo cambiar de domicilio.`);
@@ -913,7 +1437,9 @@ function render() {
   $("files-empty").hidden = S.files.length > 0;
   $("drop-t").textContent = S.files.length ? "Agregar más documentos" : "Arrastra aquí todos los documentos del cliente";
   $("procesar").hidden = !pend;
+  const foco = document.activeElement, sel = foco?.selectionStart;
   $("files").replaceChildren(...S.files.map(filaArchivo));
+  if (foco && foco.isConnected && foco !== document.activeElement && $("files").contains(foco)) { foco.focus(); try { foco.setSelectionRange(sel, sel); } catch {} }
 
   // Ficha
   $("badge-ejemplo").hidden = !S.ejemplo;
@@ -936,19 +1462,27 @@ function render() {
   $("avisos").replaceChildren(...ficha.avisos.map((a) => el("li", {}, a)));
 }
 function filaArchivo(f) {
-  const thumb = el("div", { className: "thumb" }, f.preview ? el("img", { src: f.preview, alt: "" }) : f.kind === "pdf" ? "PDF" : "IMG");
+  const thumb = el("div", { className: "thumb" }, f.preview ? el("img", { src: f.preview, alt: "" }) : { pdf: "PDF", doc: "WORD", xls: "EXCEL", zip: "ZIP" }[f.kind] || "IMG");
   const estado = f.status === "pendiente" ? el("span", { className: "stamp wait" }, "Pendiente")
     : f.status === "procesando" ? el("span", { className: "stamp run" }, f.paso || "Procesando…")
     : f.status === "error" ? el("span", { className: "stamp err" }, "No se leyó")
+    : f.status === "contrasena" ? el("span", { className: "stamp err" }, "Tiene contraseña")
     : null;
   const tipos = (f.docs || []).map((d) => el("span", { className: "stamp doc" }, d.legible ? ETIQ[d.tipo] : ETIQ[d.tipo] + " · revisar"));
   const notas = el("ul", { className: "notes" },
-    ...(f.ajustes || []).map((a) => el("li", {}, (f.kind === "pdf" ? "PDF: " : "Foto: ") + a)),
+    ...(f.ajustes || []).map((a) => el("li", {}, ({ pdf: "PDF: ", img: "Foto: " }[f.kind] || "Archivo: ") + a)),
     ...(f.docs || []).filter((d) => d.tipo === "otro").map((d) => el("li", { className: "duda" }, "No es uno de los documentos que se capturan" + (d.descripcion ? `; parece: ${d.descripcion}` : "") + ".")),
     ...(f.docs || []).flatMap((d) => d.dudas.map((x) => el("li", { className: "duda" }, x))),
-    ...(f.error ? [el("li", { className: "err" }, f.error)] : []));
+    ...(f.error ? [el("li", { className: "err" }, f.error)] : []),
+    ...(f.status === "contrasena" ? [el("li", {}, "Escribe la contraseña para abrirlo (no se guarda). Los bancos suelen usar tu RFC, tu fecha de nacimiento o los últimos dígitos de la cuenta o tarjeta; viene en el correo del banco.")] : []));
   const acciones = el("div", { className: "actions" });
-  if (f.status === "error" && f.file && !S.bloqueado) acciones.append(el("button", { className: "btn small", type: "button", onclick: () => { f.status = "pendiente"; f.error = null; render(); correr(); } }, "Reintentar"));
+  if (f.status === "contrasena") {
+    const inp = f.campoClave ||= el("input", { type: "password", className: "clave-pdf", placeholder: "Contraseña del PDF", autocomplete: "off", "aria-label": `Contraseña de ${f.name}` });
+    const abrir = () => { if (!inp.value) { inp.focus(); return; } f.password = inp.value; inp.value = ""; f.campoClave = null; f.status = "pendiente"; f.error = null; render(); correr(); };
+    if (!inp.dataset.listo) { inp.dataset.listo = "1"; inp.addEventListener("keydown", (e) => { if (e.key === "Enter") abrir(); }); }
+    acciones.append(inp, el("button", { className: "btn small", type: "button", onclick: abrir }, "Abrir"));
+  }
+  if (f.status === "error" && f.file && !f.sinReintento && !S.bloqueado) acciones.append(el("button", { className: "btn small", type: "button", onclick: () => { f.status = "pendiente"; f.error = null; render(); correr(); } }, "Reintentar"));
   return el("li", { className: "file" }, thumb,
     el("div", { style: "min-width:0" }, el("div", { className: "fname" }, f.name), el("div", { className: "fmeta" }, ...(estado ? [estado] : []), ...tipos), notas, ...((f.docs || []).length ? [el("details", { className: "detalle" }, el("summary", {}, "Ver datos leídos"),
       el("pre", {}, JSON.stringify(f.docs.map((d) => ({ tipo: ETIQ[d.tipo], ...(d.descripcion ? { "qué es": d.descripcion } : {}), ...(d[d.tipo] || {}) })), null, 1)))] : []), acciones),
@@ -1018,14 +1552,17 @@ function bloquear(e) {
   $("banner").textContent = m; $("banner").hidden = false;
 }
 let activos = 0;
+S.paralelo = 2;
 function correr() {
   if (!S.clave) { if (S.files.some((f) => f.status === "pendiente")) abrirConfig("Pega tu clave de API para empezar a leer."); render(); return; }
-  while (activos < 2 && !S.bloqueado) {
+  while (activos < S.paralelo && !S.bloqueado) {
     const f = S.files.find((x) => x.status === "pendiente"); if (!f) break;
     f.status = "procesando"; f.error = null; f.docs = null; activos++; render();
     procesar(f).then(() => { f.status = "listo"; f.paso = null; })
       .catch((e) => {
-        f.status = "error"; f.paso = null; f.error = mensajeError(e);
+        f.paso = null;
+        if (e?.code === "pdf_password") { f.status = "contrasena"; f.error = e.message; return; }
+        f.status = "error"; f.error = mensajeError(e); f.sinReintento = !!e?.sinReintento;
         if (e?.code === "clave" || e?.code === "saldo") abrirConfig(e.message);
         if (esFatal(e)) { bloquear(e); S.files.forEach((x) => { if (x.status === "pendiente") x.status = "error", x.error = "No se procesó."; }); }
       })
@@ -1033,12 +1570,13 @@ function correr() {
   }
   render();
 }
-function agregar(lista) {
-  if (S.ejemplo) limpiar();
-  const ok = /^(image\/(jpeg|png|webp)|application\/pdf)$/;
+function agregar(lista, desdeZip = false) {
+  if (S.ejemplo && !desdeZip) limpiar();
   for (const file of lista) {
-    if (!ok.test(file.type)) { aviso(`${file.name}: usa JPG, PNG o PDF`); continue; }
-    S.files.push({ id: nextId++, file, name: file.name, kind: file.type === "application/pdf" ? "pdf" : "img", status: "pendiente", docs: null, ajustes: [] });
+    const f = { id: nextId++, file, name: file.name || "archivo", kind: tipoPorNombre(file), status: "pendiente", docs: null, ajustes: [] };
+    if (!file.size) Object.assign(f, { status: "error", error: "El archivo está vacío (0 bytes). Vuelve a descargarlo o a tomar la foto.", sinReintento: true });
+    else if (file.size > 80 * 1024 * 1024) Object.assign(f, { status: "error", error: "Pesa más de 80 MB. Sube solo las páginas necesarias o una versión más ligera.", sinReintento: true });
+    S.files.push(f);
   }
   correr();   // se empiezan a leer solos
 }
@@ -1052,7 +1590,7 @@ function cargarEjemplo() {
   const E = (tipo, sec, dudas = []) => ({ tipo, legible: true, [tipo]: sec, dudas });
   S.files = [
     { id: nextId++, name: "ine_frente.jpg", kind: "img", status: "listo", ajustes: ["estaba de lado (la giré a la derecha)", "la enderecé 2.4°"],
-      docs: [E("ine", { nombre_completo: "MARÍA GUADALUPE HERNÁNDEZ RUIZ", fecha_nacimiento: "1988-07-14", curp: "HERG880714MDFRZD05", calle_numero: null, colonia: "COL. SANTA MARTHA", cp: "09510", municipio_estado: "IZTAPALAPA, CDMX", vigencia: 2031 })] },
+      docs: [E("ine", { nombre_completo: "MARÍA GUADALUPE HERNÁNDEZ RUIZ", fecha_nacimiento: "1988-07-14", curp: "HERG880714MDFRZD09", calle_numero: null, colonia: "COL. SANTA MARTHA", cp: "09510", municipio_estado: "IZTAPALAPA, CDMX", vigencia: 2031 })] },
     { id: nextId++, name: "solicitud.jpg", kind: "img", status: "listo", ajustes: ["la enderecé 3.1°"],
       docs: [E("solicitud", { nombre_completo: "María Guadalupe Hernández Ruiz", correo: "lupita.hdz88@gmail.com", telefono_celular: "5523418876", calle_numero: "Calle Ermita 214 int. 3", colonia: "Santa Martha", cp: "09510", municipio_estado: "Iztapalapa, CDMX" },
         ["el correo decía \"gmial.com\"; lo cambié a gmail.com", "celular: 5523418876 o 5523418816"])] },
@@ -1104,39 +1642,53 @@ function leerJSON(t) {
   const a = t.indexOf("{"), b = t.lastIndexOf("}"); if (a >= 0 && b > a) try { return JSON.parse(t.slice(a, b + 1)); } catch {}
   throw errorApi("invalid_json", "La respuesta no fue JSON");
 }
+const espera = (ms) => new Promise((r) => setTimeout(r, ms));
 async function llamarClaude(prompt, { images = [], modelTier, effort, schema } = {}) {
   const model = modelTier === "quick" ? "claude-haiku-5-5" : S.modelo;
   const content = [];
   for (const b of [].concat(images)) content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: await aBase64(b) } });
   content.push({ type: "text", text: prompt });
   const body = { model, max_tokens: 16000, messages: [{ role: "user", content }], output_config: { effort: effort || (modelTier === "quick" ? "low" : "high") } };
-  if (schema && !S.sinFormato) body.output_config.format = { type: "json_schema", schema };
-  let r;
-  try {
-    r = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", body: JSON.stringify(body), headers: {
-      "content-type": "application/json", "x-api-key": S.clave, "anthropic-version": "2026-10-21",
-      "anthropic-dangerous-direct-browser-access": "true" } });
-  } catch { throw errorApi("upstream_error", "Sin conexión con la API"); }
-  let j = null; try { j = await r.json(); } catch {}
-  if (!r.ok) {
-    const msg = j?.error?.message || "";
-    if (r.status === 400 && schema && !S.sinFormato && /output_config|format|schema/i.test(msg)) { S.sinFormato = true; return llamarClaude(prompt, { images, modelTier, effort, schema }); }
-    if (r.status === 401 || r.status === 403) throw errorApi("clave", "La clave de API no es válida o no tiene permiso. Revísala en Configuración.");
-    if (/credit balance/i.test(msg)) throw errorApi("saldo", "Tu cuenta de API no tiene saldo. Recarga en console.anthropic.com → Billing.");
-    if (r.status === 429) throw errorApi("rate_limited", msg);
-    if (r.status === 413) throw errorApi("prompt_too_large", msg);
-    if (r.status >= 500) throw errorApi("upstream_error", msg);
-    throw errorApi("api", "La API rechazó la solicitud: " + (msg || `error ${r.status}`));
+  for (let intento = 0; ; intento++) {
+    if (schema && !S.sinFormato) body.output_config.format = { type: "json_schema", schema };
+    else body.output_config = { effort: body.output_config.effort };
+    let r = null, j = null;
+    try {
+      r = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", body: JSON.stringify(body), headers: {
+        "content-type": "application/json", "x-api-key": S.clave, "anthropic-version": "2026-10-21",
+        "anthropic-dangerous-direct-browser-access": "true" } });
+      j = await r.json().catch(() => null);
+    } catch {}
+    // Saturación, límite por minuto o corte de red: esperar y reintentar solo (hasta 4 veces)
+    if ((!r || r.status === 429 || r.status === 529 || r.status >= 500) && intento < 4 && !/credit balance/i.test(j?.error?.message || "")) {
+      const ra = +(r?.headers.get("retry-after") || 0), seg = Math.min(90, ra > 0 ? Math.ceil(ra) + 1 : [6, 15, 30, 60][intento]);
+      S.alEsperar?.(seg, r?.status || 0);
+      await espera(seg * 1000);
+      continue;
+    }
+    if (!r) throw errorApi("upstream_error", "Sin conexión con la API");
+    if (!r.ok) {
+      const msg = j?.error?.message || "";
+      if (r.status === 400 && schema && !S.sinFormato && /output_config|format|schema/i.test(msg)) { S.sinFormato = true; continue; }
+      if (r.status === 401 || r.status === 403) throw errorApi("clave", "La clave de API no es válida o no tiene permiso. Revísala en Configuración.");
+      if (/credit balance/i.test(msg)) throw errorApi("saldo", "Tu cuenta de API no tiene saldo. Recarga en console.anthropic.com → Billing.");
+      if (r.status === 429) throw errorApi("rate_limited", msg);
+      if (r.status === 413 || /too (large|long)|exceed/i.test(msg)) throw errorApi("prompt_too_large", msg);
+      if (r.status >= 500) throw errorApi("upstream_error", msg);
+      if (/image/i.test(msg)) throw errorApi("image_rejected", msg);
+      throw errorApi("api", "La API rechazó la solicitud: " + (msg || `error ${r.status}`));
+    }
+    const precio = PRECIOS[model] || [0, 0], u = j.usage || {};
+    S.gasto += ((u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) * 1.25 + (u.cache_read_input_tokens || 0) * 0.1) * precio[0] / 1e6 + (u.output_tokens || 0) * precio[1] / 1e6;
+    $("gasto").textContent = `Gasto de esta sesión: $${S.gasto.toFixed(2)} USD`;
+    if (j.stop_reason === "refusal") throw errorApi("refused", "");
+    if (j.stop_reason === "max_tokens") throw errorApi("invalid_json", "La respuesta salió cortada");
+    return leerJSON((j.content || []).filter((b) => b.type === "text").map((b) => b.text).join(""));
   }
-  const precio = PRECIOS[model] || [0, 0], u = j.usage || {};
-  S.gasto += ((u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) * 1.25 + (u.cache_read_input_tokens || 0) * 0.1) * precio[0] / 1e6 + (u.output_tokens || 0) * precio[1] / 1e6;
-  $("gasto").textContent = `Gasto de esta sesión: $${S.gasto.toFixed(2)} USD`;
-  if (j.stop_reason === "refusal") throw errorApi("refused", "");
-  if (j.stop_reason === "max_tokens") throw errorApi("invalid_json", "La respuesta salió cortada");
-  return leerJSON((j.content || []).filter((b) => b.type === "text").map((b) => b.text).join(""));
 }
 S.sample = { json: (prompt, opts) => llamarClaude(prompt, opts) };
 S.limits = { images: { maxCount: 20 } };
+S.paralelo = 1;          // con clave propia: un archivo a la vez para no chocar con el límite por minuto de la API
 
 /* ---------- Configuración (clave guardada solo en este navegador) ---------- */
 function leerConfig() {

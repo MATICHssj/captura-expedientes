@@ -2,7 +2,7 @@ import base64, json, os
 import anthropic
 from .orientacion import detectar_rotacion
 from .preprocess import calidad_baja, preparar_imagen
-from .guia import BUSQUEDA_MINUCIOSA, CLAVE, COMO_RECONOCER
+from .guia import BUSQUEDA_MINUCIOSA, CLAVE, COMO_RECONOCER, LETRA_A_MANO
 from .schemas import DocExtraction, Lectura
 from .validators import monto_en_texto, validar
 
@@ -28,6 +28,8 @@ Cómo leer letra difícil:
 - En correos, el usuario suele parecerse al nombre de la persona: úsalo para desempatar.
 - Nunca inventes: si algo es ilegible, pon null. Si lo leíste pero no estás seguro, ponlo y agrégalo a `dudas`
   indicando el campo y las alternativas posibles (ej. "correo: jperez71 o jperez77").
+
+{LETRA_A_MANO}
 
 Por tipo:
 - INE: nombre completo, fecha de nacimiento, CURP y domicilio. Si el domicilio no trae calle, calle_numero = null.
@@ -69,8 +71,8 @@ def _bloques(data: bytes, mime: str, notas: list[str]) -> list[dict]:
     if mime == "application/pdf":
         return [{"type": "document", "source": {"type": "base64", "media_type": mime, "data": b64(data)}}]
     problema = calidad_baja(data)
-    if problema:
-        raise ArchivoMalo(problema)
+    if problema:                     # no se rechaza: se lee con más cuidado y se avisa
+        notas.append(f"{problema}; la leí de todos modos, confirma los datos con el original")
     orig, realzada, hechos = preparar_imagen(data, detectar_rotacion)
     notas.extend(hechos)
     img = lambda b: {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": b64(b)}}
@@ -93,7 +95,7 @@ def _leer(bloques: list[dict], instruccion: str) -> list[DocExtraction] | None:
 def faltantes(d: DocExtraction) -> list[str]:
     """Datos clave que quedaron vacíos (el reverso de la INE no trae nombre ni CURP: no cuenta)."""
     sec = getattr(d, d.tipo, None) if d.tipo in CLAVE else None
-    if d.tipo == "otro" or (d.tipo == "ine" and "reverso" in (d.descripcion or "").lower()):
+    if d.tipo == "otro" or (d.tipo == "ine" and "reverso" in (d.descripcion or "").lower()) or (d.descripcion or "").lower().startswith("continuaci"):
         return []
     if sec is None:
         return list(CLAVE[d.tipo])
@@ -149,7 +151,9 @@ def _extraer(data: bytes, mime: str) -> tuple[list[DocExtraction], list[str]]:
             d.dudas = list(dict.fromkeys(p + d.dudas))
         return l1, notas
 
-    if not problemas or all(d.tipo == "otro" or not d.legible for d in l1):
+    if any(not d.legible and d.tipo != "otro" for d in l1):
+        problemas.append("la primera lectura dijo que es difícil de leer: léelo de nuevo con calma, carácter por carácter")
+    if not problemas or all(d.tipo == "otro" for d in l1):
         return sin_segunda()
 
     # Segunda lectura independiente, enfocada en lo dudoso

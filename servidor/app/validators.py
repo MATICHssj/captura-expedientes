@@ -8,7 +8,96 @@ CURP_RE = re.compile(r"^[A-Z]{4}\d{6}[HMX][A-Z]{5}[A-Z0-9]\d$")
 TYPOS_DOMINIO = {"gmial.com": "gmail.com", "gamil.com": "gmail.com", "gmail.con": "gmail.com",
                  "gmai.com": "gmail.com", "hotmial.com": "hotmail.com", "hotmail.con": "hotmail.com",
                  "hotmal.com": "hotmail.com", "outlok.com": "outlook.com", "yaho.com": "yahoo.com",
-                 "yahoo.com.mx.": "yahoo.com.mx", "gmail.com.mx": "gmail.com"}
+                 "yahoo.com.mx.": "yahoo.com.mx", "gmail.com.mx": "gmail.com", "hotmai.com": "hotmail.com",
+                 "outlook.con": "outlook.com", "yahoo.con": "yahoo.com", "gmal.com": "gmail.com", "gmil.com": "gmail.com",
+                 "gmaill.com": "gmail.com", "gnail.com": "gmail.com", "gmail.co": "gmail.com", "gmail.cm": "gmail.com",
+                 "gmail.om": "gmail.com", "gmail": "gmail.com", "hotmaill.com": "hotmail.com", "hotmil.com": "hotmail.com",
+                 "homail.com": "hotmail.com", "hotmail.co": "hotmail.com", "hotmail.cm": "hotmail.com", "hotmail": "hotmail.com",
+                 "outlook.co": "outlook.com", "outlook": "outlook.com", "iclod.com": "icloud.com", "icloud.con": "icloud.com",
+                 "live.con": "live.com", "yahoo.com.m": "yahoo.com.mx", "prodigy.net.m": "prodigy.net.mx"}
+
+# --- CURP: dígito verificador oficial (RENAPO) y claves de estado ---
+CURP_DIC = "0123456789ABCDEFGHIJKLMNÑOPQRSTUVWXYZ"
+CURP_EDOS = set("AS BC BS CC CL CM CS CH DF DG GT GR HG JC MC MN MS NT NL OC PL QT QR SP SL SR TC TS TL VZ YN ZS NE".split())
+_A_LETRA = {"0": "O", "1": "I", "2": "Z", "4": "A", "5": "S", "6": "G", "7": "T", "8": "B"}
+_A_DIGITO = {"O": "0", "D": "0", "Q": "0", "U": "0", "I": "1", "L": "1", "Z": "2", "S": "5", "B": "8", "G": "6", "T": "7", "A": "4"}
+
+
+def digito_curp(c: str) -> int:
+    return (10 - sum(CURP_DIC.index(ch) * (18 - i) for i, ch in enumerate(c[:17])) % 10) % 10
+
+
+def curp_valida(c: str | None) -> bool:
+    return bool(c and CURP_RE.match(c) and c[11:13] in CURP_EDOS and int(c[17]) == digito_curp(c))
+
+
+def reparar_curp(c: str) -> str:
+    """Corrige confusiones letra/número según la posición (cada posición de la CURP es solo letra o solo número)."""
+    r = [(_A_LETRA.get(ch, ch) if (i <= 3 or 10 <= i <= 15) else _A_DIGITO.get(ch, ch) if (4 <= i <= 9 or i == 17) else ch)
+         for i, ch in enumerate(c)]
+    if len(r) == 18 and r[16].isalpha() and "".join(r[4:6]).isdigit() and int("".join(r[4:6])) > date.today().year % 100:
+        r[16] = _A_DIGITO.get(r[16], r[16])          # nacido en 19xx: ahí va un dígito
+    return "".join(r)
+
+
+# --- Código postal → estado (SEPOMEX: los dos primeros dígitos) ---
+CP_EDO = [(1, 16, "CDMX"), (20, 20, "AGS"), (21, 22, "BC"), (23, 23, "BCS"), (24, 24, "CAMP"), (25, 27, "COAH"), (28, 28, "COL"),
+          (29, 30, "CHIS"), (31, 33, "CHIH"), (34, 35, "DGO"), (36, 38, "GTO"), (39, 41, "GRO"), (42, 43, "HGO"), (44, 49, "JAL"),
+          (50, 57, "MEX"), (58, 61, "MICH"), (62, 62, "MOR"), (63, 63, "NAY"), (64, 67, "NL"), (68, 71, "OAX"), (72, 75, "PUE"),
+          (76, 76, "QRO"), (77, 77, "QROO"), (78, 79, "SLP"), (80, 82, "SIN"), (83, 85, "SON"), (86, 86, "TAB"), (87, 89, "TAMPS"),
+          (90, 90, "TLAX"), (91, 96, "VER"), (97, 97, "YUC"), (98, 99, "ZAC")]
+NOMBRE_EDO = {"CDMX": "Ciudad de México", "AGS": "Aguascalientes", "BC": "Baja California", "BCS": "Baja California Sur",
+              "CAMP": "Campeche", "COAH": "Coahuila", "COL": "Colima", "CHIS": "Chiapas", "CHIH": "Chihuahua", "DGO": "Durango",
+              "GTO": "Guanajuato", "GRO": "Guerrero", "HGO": "Hidalgo", "JAL": "Jalisco", "MEX": "Estado de México",
+              "MICH": "Michoacán", "MOR": "Morelos", "NAY": "Nayarit", "NL": "Nuevo León", "OAX": "Oaxaca", "PUE": "Puebla",
+              "QRO": "Querétaro", "QROO": "Quintana Roo", "SLP": "San Luis Potosí", "SIN": "Sinaloa", "SON": "Sonora",
+              "TAB": "Tabasco", "TAMPS": "Tamaulipas", "TLAX": "Tlaxcala", "VER": "Veracruz", "YUC": "Yucatán", "ZAC": "Zacatecas"}
+_EDO_RE = [("AGS", r"\bAGUASCALIENTES\b|\bAGS\b"), ("BCS", r"\bBAJA CALIFORNIA SUR\b|\bB\.? ?C\.? ?S\b"),
+           ("BC", r"\bBAJA CALIFORNIA\b(?! SUR)"), ("CAMP", r"\bCAMPECHE\b|\bCAMP\b"), ("COAH", r"\bCOAHUILA\b|\bCOAH\b"),
+           ("COL", r"\bCOLIMA\b"), ("CHIS", r"\bCHIAPAS\b|\bCHIS\b"), ("CHIH", r"\bCHIHUAHUA\b|\bCHIH\b"),
+           ("DGO", r"\bDURANGO\b|\bDGO\b"), ("GTO", r"\bGUANAJUATO\b|\bGTO\b"), ("GRO", r"\bGUERRERO\b|\bGRO\b"),
+           ("HGO", r"\bHIDALGO\b|\bHGO\b"), ("JAL", r"\bJALISCO\b|\bJAL\b"), ("MICH", r"\bMICHOACAN\b|\bMICH\b"),
+           ("MOR", r"\bMORELOS\b|\bMOR\b"), ("NAY", r"\bNAYARIT\b|\bNAY\b"), ("NL", r"\bNUEVO LEON\b|\bN\.? ?L\b"),
+           ("OAX", r"\bOAXACA\b|\bOAX\b"), ("PUE", r"\bPUEBLA\b|\bPUE\b"), ("QROO", r"\bQUINTANA ROO\b|\bQ\.? ?ROO\b"),
+           ("QRO", r"\bQUERETARO\b|\bQRO\b"), ("SLP", r"\bSAN LUIS POTOSI\b|\bS\.? ?L\.? ?P\b"), ("SIN", r"\bSINALOA\b"),
+           ("SON", r"\bSONORA\b"), ("TAB", r"\bTABASCO\b|\bTAB\b"), ("TAMPS", r"\bTAMAULIPAS\b|\bTAMPS\b"),
+           ("TLAX", r"\bTLAXCALA\b|\bTLAX\b"), ("VER", r"\bVERACRUZ\b|\bVER\b"), ("YUC", r"\bYUCATAN\b|\bYUC\b"),
+           ("ZAC", r"\bZACATECAS\b|\bZAC\b")]
+_ALCALDIAS = r"\b(IZTAPALAPA|COYOACAN|TLALPAN|GUSTAVO A\.? MADERO|AZCAPOTZALCO|IZTACALCO|TLAHUAC|XOCHIMILCO|MILPA ALTA|MAGDALENA CONTRERAS|CUAJIMALPA)\b"
+
+
+def estado_de_cp(cp: str) -> str | None:
+    n = int(str(cp)[:2])
+    return next((e for a, b, e in CP_EDO if a <= n <= b), None)
+
+
+def estado_de_texto(t: str | None) -> str | None:
+    """Estado que menciona un domicilio; None si no menciona ninguno o es ambiguo."""
+    s = _sin_acentos(t or "").upper()
+    cdmx = bool(re.search(r"\bCDMX\b|\bC\.D\.M\.X\b|CIUDAD DE MEXICO|\bCD\.? DE MEXICO|\bD\.? ?F\b|DISTRITO FEDERAL", s))
+    s = re.sub(r"CIUDAD DE MEXICO|\bCD\.? DE MEXICO|MEXICO,? D\.? ?F", " ", s)
+    s = re.sub(r"MIGUEL HIDALGO|DOLORES HIDALGO|HIDALGO DEL PARRAL|CIUDAD HIDALGO|VICENTE GUERRERO|JOSE MARIA MORELOS|MORELOS Y PAVON|VALLE DE GUADALUPE", " ", s)
+    hallados = {e for e, rx in _EDO_RE if re.search(rx, s)}
+    if cdmx:
+        hallados.add("CDMX")
+    if re.search(r"\bESTADO DE MEXICO\b|\bEDO\.? ?(DE )?MEX|\bEDOMEX\b|\bMEX\b|\bMEXICO\b", s):
+        hallados.add("MEX")
+    if not hallados and re.search(_ALCALDIAS, s):
+        hallados.add("CDMX")
+    return hallados.pop() if len(hallados) == 1 else None
+
+
+def cp_no_cuadra(cp: str | None, muni: str | None) -> str | None:
+    """Problema si el CP no existe o no es del estado que dice el domicilio."""
+    if not re.fullmatch(r"\d{5}", cp or ""):
+        return None
+    e1 = estado_de_cp(cp)
+    if not e1:
+        return f"el CP {cp} no existe (ningún CP de México empieza con {cp[:2]})"
+    e2 = estado_de_texto(muni)
+    if e2 and e2 != e1:
+        return f"el CP {cp} es de {NOMBRE_EDO[e1]}, pero el domicilio dice '{muni}' ({NOMBRE_EDO[e2]}); revisa el CP y el estado"
+    return None
 
 
 def _fecha_ok(s: str | None) -> bool:
@@ -59,11 +148,12 @@ def monto_en_texto(monto: float, texto: str) -> bool:
 
 
 def corregir_correo(correo: str) -> tuple[str, str | None]:
-    c = correo.strip().replace(" ", "").lower()
+    c = re.sub(r"\.{2,}", ".", correo.strip().replace(" ", "").lower().replace(",", ".")).rstrip(".")
     if "@" in c:
         usuario, dom = c.rsplit("@", 1)
-        if dom in TYPOS_DOMINIO:
-            return f"{usuario}@{TYPOS_DOMINIO[dom]}", f"dominio '{dom}' parece error de dedo; lo cambié a {TYPOS_DOMINIO[dom]}"
+        arreglo = TYPOS_DOMINIO.get(dom) or (dom[:-4] + ".com" if dom.endswith(".con") else None)
+        if arreglo:
+            return f"{usuario}@{arreglo}", f"dominio '{dom}' parece error de dedo; lo cambié a {arreglo}"
     return c, None
 
 
@@ -73,10 +163,19 @@ def validar(d: DocExtraction) -> list[str]:
     if d.ine:
         i = d.ine
         if i.curp:
-            i.curp = i.curp.replace(" ", "").upper()
+            i.curp = re.sub(r"[\s-]", "", i.curp).upper()
+            if len(i.curp) == 18 and not curp_valida(i.curp):
+                r = reparar_curp(i.curp)
+                if r != i.curp and curp_valida(r):
+                    p.append(f"CURP: se leyó '{i.curp}' y la corregí a {r} (confusión entre letra y número; así sí pasa el dígito verificador)")
+                    i.curp = r
             if not CURP_RE.match(i.curp):
                 p.append(f"CURP '{i.curp}' no tiene formato válido")
             else:
+                if i.curp[11:13] not in CURP_EDOS:
+                    p.append(f"CURP {i.curp}: '{i.curp[11:13]}' no es una clave de estado válida; algún carácter está mal leído")
+                elif int(i.curp[17]) != digito_curp(i.curp):
+                    p.append(f"la CURP {i.curp} no pasa el dígito verificador (con esos 17 caracteres terminaría en {digito_curp(i.curp)}): algún carácter está mal leído")
                 fc = fecha_desde_curp(i.curp)
                 if i.fecha_nacimiento and fc != i.fecha_nacimiento:
                     p.append(f"fecha de nacimiento {i.fecha_nacimiento} no coincide con la CURP ({fc})")
@@ -94,6 +193,8 @@ def validar(d: DocExtraction) -> list[str]:
                 p.append(f"la edad calculada ({edad} años) es poco común; revisa la fecha de nacimiento")
         if i.vigencia and i.vigencia < date.today().year:
             p.append(f"la INE venció en {i.vigencia}")
+        if i.cp and (x := cp_no_cuadra(i.cp.strip(), i.municipio_estado)):
+            p.append(x)
     if d.solicitud:
         s = d.solicitud
         if s.correo:
@@ -106,11 +207,17 @@ def validar(d: DocExtraction) -> list[str]:
             dig = re.sub(r"\D", "", s.telefono_celular)
             if len(dig) == 12 and dig.startswith("52"):
                 dig = dig[2:]
+            if len(dig) == 13 and (dig.startswith("521") or dig.startswith("044") or dig.startswith("045")):
+                dig = dig[3:]
             s.telefono_celular = dig
             if len(dig) != 10:
                 p.append(f"celular '{dig}' no tiene 10 dígitos")
+            elif dig[0] in "01":
+                p.append(f"celular {dig} empieza con {dig[0]}; en México ningún número empieza así, revisa el primer dígito")
         if s.cp and not re.fullmatch(r"\d{5}", s.cp.strip()):
             p.append(f"CP '{s.cp}' no tiene 5 dígitos")
+        elif s.cp and (x := cp_no_cuadra(s.cp.strip(), s.municipio_estado)):
+            p.append(x)
     if d.cotizacion:
         c = d.cotizacion
         if c.anio and not (2000 <= c.anio <= date.today().year + 2):
@@ -121,6 +228,8 @@ def validar(d: DocExtraction) -> list[str]:
         c = d.comprobante_domicilio
         if c.cp and not re.fullmatch(r"\d{5}", c.cp.strip()):
             p.append(f"CP del comprobante '{c.cp}' no tiene 5 dígitos")
+        elif c.cp and (x := cp_no_cuadra(c.cp.strip(), c.municipio_estado)):
+            p.append(x)
         if c.fecha_emision and not _fecha_ok(c.fecha_emision):
             p.append(f"fecha del comprobante '{c.fecha_emision}' no es válida")
     if d.estado_cuenta:

@@ -50,10 +50,10 @@ def test_detecta_foto_mala():
 
 
 def test_curp_y_validaciones():
-    assert fecha_desde_curp("PELJ900203HDFRPN09") == "1990-02-03"
-    d = DocExtraction(tipo="ine", ine=INE(curp="PELJ900203HDFRPN09", fecha_nacimiento="1990-02-08"))
+    assert fecha_desde_curp("PELJ900203HDFRPN08") == "1990-02-03"
+    d = DocExtraction(tipo="ine", ine=INE(curp="PELJ900203HDFRPN08", fecha_nacimiento="1990-02-08"))
     assert any("no coincide" in p for p in validar(d))
-    d = DocExtraction(tipo="ine", ine=INE(curp="pelj 900203hdfrpn09"))
+    d = DocExtraction(tipo="ine", ine=INE(curp="pelj 900203hdfrpn08"))
     assert validar(d) == [] and d.ine.fecha_nacimiento == "1990-02-03"   # la saca de la CURP
     s = DocExtraction(tipo="solicitud", solicitud=Solicitud(correo="Juan.Perez @Gmial.com", telefono_celular="+52 (55) 1234-5678"))
     p = validar(s)
@@ -124,3 +124,26 @@ def test_guia_en_instrucciones():
     os.environ.setdefault("ANTHROPIC_API_KEY", "prueba")
     from app import extractor
     assert "comprobante_domicilio" in extractor.SYSTEM and "IDMEX" in extractor.SYSTEM and "{" not in extractor.SYSTEM
+
+
+# ---- verificaciones de lectura: dígito verificador, letra/número, CP vs estado ----
+from app.validators import curp_valida, reparar_curp, estado_de_texto, cp_no_cuadra
+
+
+def test_curp_digito_verificador_y_reparacion():
+    assert curp_valida("PELJ900203HDFRPN08") and not curp_valida("PELJ900203HDFRPN09")
+    d = DocExtraction(tipo="ine", ine=INE(curp="PELJ9OO2O3HDFRPN08"))   # O en vez de 0
+    p = validar(d)
+    assert d.ine.curp == "PELJ900203HDFRPN08" and any("corregí" in x for x in p)
+    d = DocExtraction(tipo="ine", ine=INE(curp="PELJ900203HDFRPN09"))
+    assert any("dígito verificador" in x for x in validar(d))
+
+
+def test_cp_contra_estado():
+    assert estado_de_texto("Iztapalapa, CDMX") == "CDMX" and estado_de_texto("Ecatepec, Edo. Méx.") == "MEX"
+    assert estado_de_texto("Zapopan, Jal.") == "JAL" and estado_de_texto("Guerrero, Tamaulipas") is None
+    assert estado_de_texto("Miguel Hidalgo, CDMX") == "CDMX" and estado_de_texto("Col. Centro") is None
+    assert "Jalisco" in cp_no_cuadra("44510", "Iztapalapa, CDMX") and cp_no_cuadra("09510", "Iztapalapa, CDMX") is None
+    s = DocExtraction(tipo="solicitud", solicitud=Solicitud(cp="44510", municipio_estado="Iztapalapa, CDMX", telefono_celular="044 55 1234 5678", correo="ANA,LOPEZ@GMAIL.CON"))
+    p = validar(s)
+    assert any("Jalisco" in x for x in p) and s.solicitud.telefono_celular == "5512345678" and s.solicitud.correo == "ana.lopez@gmail.com"
