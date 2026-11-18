@@ -428,7 +428,7 @@ function armarFicha() {
   return {
     campos: {
       nombre: { v: nombre, src: nombreSrc },
-      fecha_nacimiento: { v: ine?.fecha_nacimiento || null, src: ine?.fecha_nacimiento ? "INE" : null },
+      fecha_nacimiento: { v: ine?.fecha_nacimiento || sol?.fecha_nacimiento || null, src: ine?.fecha_nacimiento ? "INE" : sol?.fecha_nacimiento ? "Solicitud" : null },
       direccion: { v: direccion, src: dirSrc },
       correo: { v: sol?.correo || null, src: sol?.correo ? "Solicitud" : null },
       celular: { v: sol?.telefono_celular || null, src: sol?.telefono_celular ? "Solicitud" : null },

@@ -69,7 +69,7 @@ def armar_resumen(docs: list[DocExtraction], correcciones: dict | None = None) -
 
     r = {
         "nombre": (ine.nombre_completo if ine and ine.nombre_completo else sol.nombre_completo if sol else None),
-        "fecha_nacimiento": ine.fecha_nacimiento if ine else None,
+        "fecha_nacimiento": (ine.fecha_nacimiento if ine and ine.fecha_nacimiento else sol.fecha_nacimiento if sol else None),
         "direccion": direccion, "direccion_fuente": dir_fuente,
         "correo": sol.correo if sol else None,
         "celular": sol.telefono_celular if sol else None,

@@ -305,16 +305,21 @@ function grises(src, maxSide) {
   for (let i = 0, j = 0; j < g.length; i += 4, j++) g[j] = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
   return { g, w: c.width, h: c.height };
 }
-/** Nitidez promedio (bordes). Valores < 2 = foto muy borrosa. */
+/** Nitidez de los bordes más marcados (no se engaña con hojas de poca letra). Menos de 18 = borrosa. */
 function nitidez(src) {
-  const { g, w, h } = grises(src, 800);
-  let s = 0, n = 0;
+  const { g, w, h } = grises(src, 800), hist = new Uint32Array(1021); let n = 0;
   for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
-    const i = y * w + x;
-    const v = 8 * g[i] - (g[i - 1] + g[i + 1] + g[i - w] + g[i + w] + g[i - w - 1] + g[i - w + 1] + g[i + w - 1] + g[i + w + 1]);
-    s += v < 0 ? 0 : v > 255 ? 255 : v; n++;
+    const i = y * w + x; hist[Math.min(1020, Math.abs(4 * g[i] - g[i - 1] - g[i + 1] - g[i - w] - g[i + w]) | 0)]++; n++;
   }
-  return n ? s / n : 0;
+  let acc = 0; for (let v = 1020; v >= 0; v--) { acc += hist[v]; if (acc >= n * 0.002) return v; }
+  return 0;
+}
+/** Página en blanco (o solo con una marca de agua clara): lo más oscuro sigue siendo casi blanco. */
+function enBlanco(src) {
+  const { g } = grises(src, 400), hist = new Uint32Array(256);
+  for (const v of g) hist[v | 0]++;
+  let acc = 0; for (let v = 0; v < 256; v++) { acc += hist[v]; if (acc >= g.length * 0.005) return v > 205; }
+  return true;
 }
 /** Umbral de Otsu sobre un arreglo de grises. */
 function otsu(g) {
@@ -722,6 +727,39 @@ function textoBasura(t) {
   const letras = (t.match(/[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]/g) || []).length, vocales = (t.match(/[AEIOUaeiouÁÉÍÓÚáéíóú]/g) || []).length;
   return buenos / t.length < 0.75 || (letras > 40 && vocales / letras < 0.18);
 }
+/** Valores llenados en un formulario PDF, con la etiqueta impresa más cercana y en orden de lectura.
+ *  Descarta valores dañados (basura de miles de caracteres) y casillas: esas se ven en la imagen. */
+function camposFormulario(anots, items) {
+  const etiquetas = items.filter((it) => (it.str || "").trim().length > 1 && it.transform)
+    .map((it) => ({ s: it.str.trim(), x: it.transform[4], y: it.transform[5], w: it.width || 0 }));
+  const generico = (n) => !n || /^(text|texto|campo|field|check ?box|dropdown|combo|list|radio|undefined)[\s_-]*\d*$/i.test(n.trim());
+  const cercana = (r) => {                       // r = [x1, y1, x2, y2] en puntos del PDF (y hacia arriba)
+    let mejor = null, md = Infinity;
+    for (const e of etiquetas) {                 // dentro de la casilla o justo encima
+      if (e.x < r[2] && e.x + e.w > r[0] - 2 && e.y >= r[1] - 2 && e.y <= r[3] + 16) {
+        const d = Math.abs(e.y - r[3]) + Math.abs(e.x - r[0]) * 0.3; if (d < md) { md = d; mejor = e.s; }
+      }
+    }
+    if (mejor) return mejor;
+    for (const e of etiquetas) {                 // a la izquierda, en el mismo renglón
+      const d = r[0] - (e.x + e.w);
+      if (e.y >= r[1] - 3 && e.y <= r[3] + 3 && d >= -2 && d < 160 && d < md) { md = d; mejor = e.s; }
+    }
+    return mejor;
+  };
+  const out = [];
+  for (const a of anots) {
+    if (a.subtype !== "Widget" || a.fieldType === "Btn" || a.fieldType === "Sig" || !Array.isArray(a.rect)) continue;
+    let v = Array.isArray(a.fieldValue) ? a.fieldValue.join(", ") : a.fieldValue;
+    v = v == null ? "" : String(v).replace(/\s+/g, " ").trim();
+    if (!v || v === "Off" || /^selecciona/i.test(v) || v.length > 300 || /Ã.|Â./.test(v) || (v.length >= 40 && textoBasura(v))) continue;
+    const et = (a.alternativeText || cercana(a.rect) || "").replace(/\s+/g, " ").trim(), nombre = generico(a.fieldName) ? "" : a.fieldName.trim();
+    const etiqueta = et || nombre || "campo sin etiqueta";
+    out.push({ y: a.rect[3], x: a.rect[0], linea: `${etiqueta}${et && nombre && plano(nombre).replace(/\W/g, "") !== plano(et).replace(/\W/g, "") ? ` [campo "${nombre}"]` : ""}: ${v}` });
+  }
+  out.sort((a, b) => Math.abs(b.y - a.y) > 4 ? b.y - a.y : a.x - b.x);
+  return out.map((o) => o.linea);
+}
 /** PDF: texto exacto por página, valores de campos de formulario, y qué páginas hay que ver como imagen. */
 async function abrirPDF(item, notas) {
   if (!window.pdfjsLib) throw new Error("No se pudo cargar el lector de PDF. Revisa tu conexión y recarga la página.");
@@ -737,9 +775,9 @@ async function abrirPDF(item, notas) {
   for (let p = 1; p <= N; p++) {
     if (N > 3) paso(item, `Revisando página ${p} de ${N}…`);
     const page = await pdf.getPage(p);
-    let texto = (await page.getTextContent()).items.map((it) => (it.str || "") + (it.hasEOL ? "\n" : " ")).join("");
-    const campos = (await page.getAnnotations().catch(() => [])).filter((a) => a.subtype === "Widget" && a.fieldValue != null && String(a.fieldValue).trim() !== "" && a.fieldValue !== "Off")
-      .map((a) => `${a.alternativeText || a.fieldName || "campo"}: ${Array.isArray(a.fieldValue) ? a.fieldValue.join(", ") : a.fieldValue}`);
+    const items = (await page.getTextContent()).items;
+    let texto = items.map((it) => (it.str || "") + (it.hasEOL ? "\n" : " ")).join("");
+    const campos = camposFormulario(await page.getAnnotations().catch(() => []), items);
     let imgMax = 0;
     const ops = await page.getOperatorList().catch(() => null);
     if (ops) for (let i = 0; i < ops.fnArray.length; i++) {
@@ -748,8 +786,9 @@ async function abrirPDF(item, notas) {
       else if (fn === OPS.paintInlineImageXObject || fn === OPS.paintImageMaskXObject) imgMax = Math.max(imgMax, (a?.[0]?.width || 0) * (a?.[0]?.height || 0));
     }
     const util = texto.replace(/\s/g, "");
-    const conTexto = util.length > 150 && !textoBasura(util), escaneada = imgMax >= 500000 || !conTexto;
-    if (campos.length) texto += `\n[Campos llenados del formulario]\n${campos.join("\n")}`;
+    const conTexto = util.length > 150 && !textoBasura(util), escaneada = imgMax >= 500000 || (!conTexto && !campos.length);
+    if (texto.length > 30000) texto = texto.slice(0, 30000);
+    if (campos.length) texto = `[Valores llenados en el formulario (exactos), de arriba a abajo]\n${campos.join("\n")}\n[Texto impreso de la página]\n${texto}`;
     const render = async (lado) => {
       const vp0 = page.getViewport({ scale: 1 }), scale = Math.min(4, lado / Math.max(vp0.width, vp0.height)), vp = page.getViewport({ scale });
       const c = lienzo(vp.width, vp.height), x = c.getContext("2d");
@@ -757,7 +796,8 @@ async function abrirPDF(item, notas) {
       await page.render({ canvasContext: x, viewport: vp }).promise;
       return c;
     };
-    paginas.push({ etiqueta: `página ${p}`, p, texto: conTexto || campos.length ? texto : null, ocr: conTexto && escaneada, clase: escaneada ? "escaneo" : "digital", render, formato: p === 1 && !escaneada, campos: campos.length });
+    paginas.push({ etiqueta: `página ${p}`, p, texto: conTexto || campos.length ? texto : null, ocr: conTexto && escaneada && !campos.length,
+      clase: escaneada ? "escaneo" : campos.length ? "formulario" : "digital", render, formato: p === 1 && !escaneada, campos: campos.length });
   }
   const nCampos = paginas.reduce((s, p) => s + p.campos, 0), nEsc = paginas.filter((p) => p.clase === "escaneo").length;
   if (nCampos) notas.push(`traía ${nCampos} campo(s) de formulario llenados; los leí`);
@@ -786,6 +826,14 @@ async function armarTandas(item, paginas, notas) {
   const maxImgs = Math.max(1, S.limits?.images?.maxCount ?? 1);
   const digitales = paginas.filter((p) => p.texto && !p.ocr), ocr = paginas.filter((p) => p.texto && p.ocr);
   let conImagen = paginas.filter((p) => p.clase !== "digital" || p.formato);
+  // Estados de cuenta largos: de las páginas de movimientos solo van los renglones con saldos y totales (menos uso de Claude)
+  const largo = digitales.reduce((n, p) => n + p.texto.length, 0) > 45000;
+  const CLAVES = /TOTAL|SALDO (ANTERIOR|INICIAL|FINAL|AL CORTE|PROMEDIO|ACTUAL)|PER[IÍ]ODO|FECHA DE CORTE|RESUMEN|TITULAR|CLABE/i;
+  const compacto = (p, i) => {
+    if (!largo || i < 2 || /SALDO ANTERIOR|SALDO INICIAL|RESUMEN DEL PERIODO|RESUMEN DE/i.test(p.texto.slice(0, 4000))) return p.texto.slice(0, 12000);
+    const lineas = p.texto.split("\n").map((l) => l.trim()).filter(Boolean);
+    return [...lineas.slice(0, 3), ...lineas.slice(3).filter((l) => CLAVES.test(l)).slice(0, 15)].join("\n") + "\n[…movimientos omitidos…]";
+  };
   const MAX_PAG_IMG = 30;
   if (conImagen.length > MAX_PAG_IMG) { notas.push(`solo leí como imagen las primeras ${MAX_PAG_IMG} páginas escaneadas`); conImagen = conImagen.slice(0, MAX_PAG_IMG); }
   const vistas = conImagen.filter((p) => p.clase !== "digital").length;
@@ -794,14 +842,23 @@ async function armarTandas(item, paginas, notas) {
     const varias = conImagen.length > 1, pref = varias ? `${pg.etiqueta}: ` : "";
     paso(item, varias ? `Preparando ${pg.etiqueta} (${i + 1} de ${conImagen.length})…` : "Revisando la imagen…");
     let src = pg.img || await pg.render(pg.clase === "digital" ? 1600 : 2800);
+    if (pg.clase === "formulario") {       // formulario PDF: los valores se ven en sus casillas; va completa y en franjas para leer cada casilla
+      const c = escalado(src, MAX_SIDE), h2 = c.height >= c.width, nF = Math.min(h2 ? 3 : 2, maxImgs - 1);
+      if (!item.preview) item.preview = await vistaPrevia(c);
+      const imgs = [{ blob: await aEnvio(c), desc: `${pg.etiqueta} del formulario, completa (los valores llenados y las casillas marcadas se ven en su lugar)`, principal: true }];
+      for (const [k, f] of franjas(c, nF).entries()) imgs.push({ blob: await aEnvio(f), desc: `${pg.etiqueta} del formulario: franja ${k + 1} de ${nF} (de arriba a abajo), para leer cada casilla y ver cuáles están marcadas` });
+      unidades.push({ imgs, exigente: true });
+      continue;
+    }
     if (pg.clase === "digital") {          // página de PDF digital: solo para ver formato y logos; el texto exacto va aparte
       if (!item.preview) item.preview = await vistaPrevia(src);
       unidades.push({ imgs: [{ blob: await aEnvio(src), desc: `${pg.etiqueta} del PDF digital, para ver formato y logotipos (el texto exacto va abajo)`, principal: true }] });
       continue;
     }
+    if (pg.clase === "escaneo" && enBlanco(src)) { notas.push(pref + "está en blanco; la omití"); continue; }
     const w = src.naturalWidth || src.width, h = src.naturalHeight || src.height;
     if (Math.max(w, h) < 1000) { src = ampliar(src, 1600); notas.push(pref + "era de baja resolución; la amplié"); pg.baja = true; }
-    if (nitidez(src) < 2) { notas.push(pref + "se ve borrosa; la leí con más cuidado"); pg.borrosa = true; }
+    if (nitidez(src) < 18) { notas.push(pref + "se ve borrosa; la leí con más cuidado"); pg.borrosa = true; }
     const nF = vistas === 1 ? (h >= w ? 3 : 2) : vistas <= 6 ? 2 : 0;
     const prep = await prepararPagina(src, { orientar: pg.clase === "foto" || vistas <= 6 || i === 0, recortar: pg.clase === "foto",
       nFranjas: Math.min(nF, maxImgs - 1), zoom: vistas === 1 && maxImgs >= 5, notas, pref });
@@ -811,21 +868,21 @@ async function armarTandas(item, paginas, notas) {
     for (const [k, c] of prep.piezas.entries()) imgs.push({ blob: await aEnvio(c), desc: `${pg.etiqueta}: franja ${k + 1} de ${prep.piezas.length} (de arriba a abajo), realzada en grises para letra chica o tenue` });
     const zoom = prep.cuadrantes.length ? [imgs[0], ...await Promise.all(prep.cuadrantes.map(async (c, k) => ({ blob: await aEnvio(c),
       desc: `${pg.etiqueta}: cuadrante ${["de arriba a la izquierda", "de arriba a la derecha", "de abajo a la izquierda", "de abajo a la derecha"][k]} ampliado al doble y realzado` })))] : null;
-    unidades.push({ imgs, zoom, dudosa: pg.borrosa || pg.baja });
+    unidades.push({ imgs, zoom, dudosa: pg.borrosa || pg.baja, exigente: true });
   }
   // Agrupar: cada llamada lleva como máximo maxImgs imágenes y 8 páginas
   const tandas = []; let t = null;
   for (const u of unidades) {
     const imgs = u.imgs.slice(0, maxImgs);
-    if (!t || t.imgs.length + imgs.length > maxImgs || t.paginas >= 8) { t = { imgs: [], paginas: 0, zoom: null, dudosa: false }; tandas.push(t); }
-    t.imgs.push(...imgs); t.paginas++; t.dudosa ||= !!u.dudosa;
+    if (!t || t.imgs.length + imgs.length > maxImgs || t.paginas >= 8) { t = { imgs: [], paginas: 0, zoom: null, dudosa: false, exigente: false }; tandas.push(t); }
+    t.imgs.push(...imgs); t.paginas++; t.dudosa ||= !!u.dudosa; t.exigente ||= !!u.exigente;
     if (u.zoom && unidades.length === 1) t.zoom = u.zoom;
   }
-  if (!tandas.length) tandas.push({ imgs: [], paginas: 0, zoom: null, dudosa: false });
-  const bloque = (lista) => lista.map((p) => `--- ${p.etiqueta} ---\n${p.texto}`).join("\n");
-  tandas[0].texto = [digitales.length ? `TEXTO EXACTO (extraído del archivo digital; los números y nombres de aquí son exactos):\n<<<\n${bloque(digitales).slice(0, 110000)}\n>>>` : "",
+  if (!tandas.length) tandas.push({ imgs: [], paginas: 0, zoom: null, dudosa: false, exigente: false });
+  const bloque = (lista) => lista.map((p, i) => `--- ${p.etiqueta} ---\n${compacto(p, i)}`).join("\n");
+  tandas[0].texto = [digitales.length ? `TEXTO EXACTO (extraído del archivo digital; los números y nombres de aquí son exactos${largo ? "; de las páginas de movimientos solo van los renglones con saldos, totales y fechas" : ""}):\n<<<\n${bloque(digitales).slice(0, 110000)}\n>>>` : "",
     ocr.length ? `TEXTO DE OCR DEL ESCÁNER (puede traer errores; confírmalo con las imágenes):\n<<<\n${bloque(ocr).slice(0, 40000)}\n>>>` : ""].filter(Boolean).join("\n\n");
-  item.textoExacto = digitales.filter((p) => p.clase === "digital").map((p) => p.texto).join("\n");
+  item.textoExacto = digitales.filter((p) => p.clase !== "escaneo").map((p) => p.texto).join("\n");
   return tandas;
 }
 
@@ -894,17 +951,17 @@ Por tipo:
 - INE: nombre completo (nombre(s) y apellidos en orden natural), fecha de nacimiento, CURP, domicilio y año de vigencia (ej. "VIGENCIA 2021-2031" -> 2031). Si el domicilio no trae calle, calle_numero = null.
 - Estado de cuenta: del RESUMEN del periodo copia, tal como están impresos: saldo inicial/anterior, total de depósitos/abonos, total de retiros/cargos y saldo final. No los calcules tú. cuenta_terminacion = últimos 4 dígitos de la cuenta o CLABE. evidencia_total = copia LITERAL del renglón donde viene el total de depósitos/abonos. suma_abonos_movimientos solo si ves toda la tabla de movimientos; si no, null. periodo_fin = fecha de corte.
   Antes de responder comprueba: saldo inicial + abonos − cargos = saldo final. Si no cuadra, vuelve a leer esos números con cuidado; si sigue sin cuadrar, deja lo que dice el documento y anótalo en "dudas".
-- Solicitud: nombre, correo, celular (10 dígitos) y domicilio.
+- Solicitud: nombre, correo, celular (10 dígitos), domicilio y, si vienen, fecha de nacimiento, CURP y RFC (cópialos tal cual, aunque parezcan incompletos). Si la fecha viene en casillas separadas (día, mes, año), júntala. "Lugar de nacimiento" (país o estado donde nació) NO es el domicilio. Si no hay correo personal pero sí correo del trabajo, usa ese y anótalo en "dudas" ("correo: es el del trabajo").
 - Cotización: marca, modelo y versión, año (modelo del auto), precio total del auto y, si aparece, el nombre del cliente.
 - Comprobante de domicilio: emisor, titular, domicilio (calle y número, colonia, CP, municipio/estado) y fecha de emisión.
 - Fechas en formato AAAA-MM-DD. Montos como número sin $ ni comas (ej. 45230.5).
 
 Responde SOLO con JSON. En cada documento incluye ÚNICAMENTE la sección de su tipo (omite las de los otros tipos) y usa null en lo que no aparezca. Forma:
-{"documentos":[{"tipo":"solicitud","descripcion":"Solicitud NR Finance llenada a mano","legible":true,"solicitud":{"nombre_completo":null,"correo":null,"telefono_celular":null,"calle_numero":null,"colonia":null,"cp":null,"municipio_estado":null},"dudas":[]}]}
+{"documentos":[{"tipo":"solicitud","descripcion":"Solicitud NR Finance llenada a mano","legible":true,"solicitud":{"nombre_completo":null,"correo":null,"telefono_celular":null,"calle_numero":null,"colonia":null,"cp":null,"municipio_estado":null,"fecha_nacimiento":null,"curp":null,"rfc":null},"dudas":[]}]}
 Campos de cada sección:
 "ine":{"nombre_completo":null,"fecha_nacimiento":null,"curp":null,"calle_numero":null,"colonia":null,"cp":null,"municipio_estado":null,"vigencia":null}
 "estado_cuenta":{"banco":null,"titular":null,"cuenta_terminacion":null,"periodo_inicio":null,"periodo_fin":null,"saldo_inicial":null,"total_depositos_abonos":null,"total_retiros_cargos":null,"saldo_final":null,"evidencia_total":null,"suma_abonos_movimientos":null}
-"solicitud":{"nombre_completo":null,"correo":null,"telefono_celular":null,"calle_numero":null,"colonia":null,"cp":null,"municipio_estado":null}
+"solicitud":{"nombre_completo":null,"correo":null,"telefono_celular":null,"calle_numero":null,"colonia":null,"cp":null,"municipio_estado":null,"fecha_nacimiento":null,"curp":null,"rfc":null}
 "cotizacion":{"marca":null,"modelo":null,"anio":null,"precio":null,"cliente_nombre":null}
 "comprobante_domicilio":{"emisor":null,"titular":null,"calle_numero":null,"colonia":null,"cp":null,"municipio_estado":null,"fecha_emision":null}
 Para "otro" no incluyas sección. Si unas páginas solo continúan un documento que empieza en otra parte del archivo (ej. hojas de movimientos sin el resumen), devuélvelas con "descripcion":"Continuación de …" y solo los datos que se vean.`;
@@ -918,7 +975,7 @@ const ESQUEMA = OBJ({ documentos: { type: "array", items: OBJ({
   legible: { type: "boolean" },
   ine: NOBJ({ nombre_completo: NUL("string"), fecha_nacimiento: NUL("string"), curp: NUL("string"), calle_numero: NUL("string"), colonia: NUL("string"), cp: NUL("string"), municipio_estado: NUL("string"), vigencia: NUL("integer") }),
   estado_cuenta: NOBJ({ banco: NUL("string"), titular: NUL("string"), cuenta_terminacion: NUL("string"), periodo_inicio: NUL("string"), periodo_fin: NUL("string"), saldo_inicial: NUL("number"), total_depositos_abonos: NUL("number"), total_retiros_cargos: NUL("number"), saldo_final: NUL("number"), evidencia_total: NUL("string"), suma_abonos_movimientos: NUL("number") }),
-  solicitud: NOBJ({ nombre_completo: NUL("string"), correo: NUL("string"), telefono_celular: NUL("string"), calle_numero: NUL("string"), colonia: NUL("string"), cp: NUL("string"), municipio_estado: NUL("string") }),
+  solicitud: NOBJ({ nombre_completo: NUL("string"), correo: NUL("string"), telefono_celular: NUL("string"), calle_numero: NUL("string"), colonia: NUL("string"), cp: NUL("string"), municipio_estado: NUL("string"), fecha_nacimiento: NUL("string"), curp: NUL("string"), rfc: NUL("string") }),
   cotizacion: NOBJ({ marca: NUL("string"), modelo: NUL("string"), anio: NUL("integer"), precio: NUL("number"), cliente_nombre: NUL("string") }),
   comprobante_domicilio: NOBJ({ emisor: NUL("string"), titular: NUL("string"), calle_numero: NUL("string"), colonia: NUL("string"), cp: NUL("string"), municipio_estado: NUL("string"), fecha_emision: NUL("string") }),
   dudas: { type: "array", items: { type: "string" } },
@@ -1003,12 +1060,12 @@ const TYPOS = { "gmial.com": "gmail.com", "gamil.com": "gmail.com", "gmail.con":
 const SECCIONES = {
   ine: ["nombre_completo", "fecha_nacimiento", "curp", "calle_numero", "colonia", "cp", "municipio_estado", "vigencia"],
   estado_cuenta: ["banco", "titular", "periodo_inicio", "periodo_fin", "total_depositos_abonos", "suma_abonos_movimientos", "cuenta_terminacion", "saldo_inicial", "total_retiros_cargos", "saldo_final", "evidencia_total"],
-  solicitud: ["nombre_completo", "correo", "telefono_celular", "calle_numero", "colonia", "cp", "municipio_estado"],
+  solicitud: ["nombre_completo", "correo", "telefono_celular", "calle_numero", "colonia", "cp", "municipio_estado", "fecha_nacimiento", "curp", "rfc"],
   cotizacion: ["marca", "modelo", "anio", "precio", "cliente_nombre"],
   comprobante_domicilio: ["emisor", "titular", "calle_numero", "colonia", "cp", "municipio_estado", "fecha_emision"],
 };
 const CRITICOS = { ine: ["nombre_completo", "fecha_nacimiento", "curp", "calle_numero", "colonia", "cp"],
-  solicitud: ["nombre_completo", "correo", "telefono_celular", "calle_numero", "colonia", "cp"],
+  solicitud: ["nombre_completo", "correo", "telefono_celular", "calle_numero", "colonia", "cp", "curp"],
   cotizacion: ["modelo", "anio", "precio"], estado_cuenta: ["total_depositos_abonos", "periodo_fin", "banco"],
   comprobante_domicilio: ["titular", "calle_numero", "cp", "fecha_emision"] };
 const CLAVE = {"ine": ["nombre_completo", "fecha_nacimiento", "curp", "colonia", "cp"], "solicitud": ["nombre_completo", "correo", "telefono_celular", "calle_numero", "cp"], "cotizacion": ["modelo", "anio", "precio"], "estado_cuenta": ["banco", "titular", "periodo_fin", "saldo_inicial", "total_depositos_abonos", "total_retiros_cargos", "saldo_final"], "comprobante_domicilio": ["titular", "calle_numero", "cp", "fecha_emision"]};
@@ -1052,39 +1109,56 @@ function normalizar(raw) {
     return out;
   });
 }
+const RFC_RE = /^[A-ZÑ&]{4}\d{6}[A-Z0-9]{3}$/;
+function fechaDeRfc(r) { if (!/^[A-ZÑ&]{4}\d{6}/.test(r || "")) return null; const yy = +r.slice(4, 6); return `${yy > new Date().getFullYear() % 100 ? 19 : 20}${r.slice(4, 6)}-${r.slice(6, 8)}-${r.slice(8, 10)}`; }
+/** CURP (dígito verificador, corrección letra/número), fecha de nacimiento y RFC de una sección (INE o solicitud). */
+function revisarIdentidad(i, p) {
+  if (i.curp) {
+    i.curp = i.curp.replace(/[\s-]/g, "").toUpperCase();
+    if (i.curp.length === 18 && !curpValida(i.curp)) {
+      const r = repararCurp(i.curp);
+      if (r !== i.curp && curpValida(r)) { p.push(`CURP: se leyó "${i.curp}" y la corregí a ${r} (confusión entre letra y número; así sí pasa el dígito verificador)`); i.curp = r; }
+    }
+    if (!CURP_RE.test(i.curp)) p.push(`CURP "${i.curp}" no tiene formato válido (debe ser 4 letras, 6 números, H o M, 5 letras, 1 letra o número y 1 número)`);
+    else {
+      if (!CURP_EDOS.has(i.curp.slice(11, 13))) p.push(`CURP ${i.curp}: "${i.curp.slice(11, 13)}" no es una clave de estado válida; algún carácter está mal leído`);
+      else if (+i.curp[17] !== digitoCurp(i.curp)) p.push(`la CURP ${i.curp} no pasa el dígito verificador (con esos primeros 17 caracteres terminaría en ${digitoCurp(i.curp)}): algún carácter está mal leído`);
+      const fc = fechaDeCurp(i.curp);
+      if (i.fecha_nacimiento && fc !== i.fecha_nacimiento) p.push(`fecha de nacimiento ${i.fecha_nacimiento} no coincide con la CURP (${fc})`);
+      else if (!i.fecha_nacimiento) i.fecha_nacimiento = fc;
+      if (i.nombre_completo && !curpVsNombre(i.curp, i.nombre_completo)) p.push(`la CURP ${i.curp} no corresponde a las iniciales del nombre "${i.nombre_completo}"`);
+    }
+  }
+  if (i.fecha_nacimiento && !fechaValida(i.fecha_nacimiento)) p.push(`fecha de nacimiento "${i.fecha_nacimiento}" no es válida`);
+  else if (i.fecha_nacimiento) {
+    const [y, m, d] = i.fecha_nacimiento.split("-").map(Number), hoy = new Date();
+    const edad = hoy.getFullYear() - y - ((hoy.getMonth() + 1 < m || (hoy.getMonth() + 1 === m && hoy.getDate() < d)) ? 1 : 0);
+    if (edad < 18 || edad > 85) p.push(`la edad calculada (${edad} años) es poco común; revisa la fecha de nacimiento`);
+  }
+  if (i.rfc !== undefined && i.rfc) {
+    i.rfc = i.rfc.replace(/[\s-]/g, "").toUpperCase();
+    if (!RFC_RE.test(i.rfc) && !/^[A-ZÑ&]{4}\d{6}$/.test(i.rfc)) p.push(`RFC "${i.rfc}" no tiene formato válido (4 letras, 6 números de la fecha y 3 de homoclave)`);
+    else {
+      const fr = fechaDeRfc(i.rfc);
+      if (i.fecha_nacimiento && fechaValida(i.fecha_nacimiento) && fr !== i.fecha_nacimiento) p.push(`el RFC ${i.rfc} dice nacimiento ${fr}, pero la fecha de nacimiento es ${i.fecha_nacimiento}`);
+      else if (!i.fecha_nacimiento && fechaValida(fr)) i.fecha_nacimiento = fr;
+      if (i.curp && i.curp.length >= 10 && i.curp.slice(0, 10) !== i.rfc.slice(0, 10)) p.push(`el RFC ${i.rfc} y la CURP ${i.curp} no coinciden en los primeros 10 caracteres`);
+    }
+  }
+}
 /** Revisa y corrige en el lugar; regresa la lista de problemas. */
 function validar(d) {
   const p = [];
   if (d.ine) {
     const i = d.ine;
-    if (i.curp) {
-      i.curp = i.curp.replace(/[\s-]/g, "").toUpperCase();
-      if (i.curp.length === 18 && !curpValida(i.curp)) {
-        const r = repararCurp(i.curp);
-        if (r !== i.curp && curpValida(r)) { p.push(`CURP: se leyó "${i.curp}" y la corregí a ${r} (confusión entre letra y número; así sí pasa el dígito verificador)`); i.curp = r; }
-      }
-      if (!CURP_RE.test(i.curp)) p.push(`CURP "${i.curp}" no tiene formato válido (debe ser 4 letras, 6 números, H o M, 5 letras, 1 letra o número y 1 número)`);
-      else {
-        if (!CURP_EDOS.has(i.curp.slice(11, 13))) p.push(`CURP ${i.curp}: "${i.curp.slice(11, 13)}" no es una clave de estado válida; algún carácter está mal leído`);
-        else if (+i.curp[17] !== digitoCurp(i.curp)) p.push(`la CURP ${i.curp} no pasa el dígito verificador (con esos primeros 17 caracteres terminaría en ${digitoCurp(i.curp)}): algún carácter está mal leído`);
-        const fc = fechaDeCurp(i.curp);
-        if (i.fecha_nacimiento && fc !== i.fecha_nacimiento) p.push(`fecha de nacimiento ${i.fecha_nacimiento} no coincide con la CURP (${fc})`);
-        else if (!i.fecha_nacimiento) i.fecha_nacimiento = fc;
-        if (i.nombre_completo && !curpVsNombre(i.curp, i.nombre_completo)) p.push(`la CURP ${i.curp} no corresponde a las iniciales del nombre "${i.nombre_completo}"`);
-      }
-    }
-    if (i.fecha_nacimiento && !fechaValida(i.fecha_nacimiento)) p.push(`fecha de nacimiento "${i.fecha_nacimiento}" no es válida`);
-    else if (i.fecha_nacimiento) {
-      const [y, m, d] = i.fecha_nacimiento.split("-").map(Number), hoy = new Date();
-      const edad = hoy.getFullYear() - y - ((hoy.getMonth() + 1 < m || (hoy.getMonth() + 1 === m && hoy.getDate() < d)) ? 1 : 0);
-      if (edad < 18 || edad > 85) p.push(`la edad calculada (${edad} años) es poco común; revisa la fecha de nacimiento`);
-    }
+    revisarIdentidad(i, p);
     if (i.vigencia && i.vigencia < new Date().getFullYear()) p.push(`la INE venció en ${i.vigencia}`);
     if (i.cp && !/^\d{5}$/.test(i.cp.trim())) p.push(`CP de la INE "${i.cp}" no tiene 5 dígitos`);
     else if (i.cp) { const x = cpNoCuadra(i.cp.trim(), i.municipio_estado); if (x) p.push(x); }
   }
   if (d.solicitud) {
     const s = d.solicitud;
+    revisarIdentidad(s, p);
     if (s.correo) {
       s.correo = s.correo.replace(/\s/g, "").toLowerCase();
       s.correo = s.correo.replace(/,/g, ".").replace(/\.+$/, "").replace(/\.{2,}/g, ".");
@@ -1206,7 +1280,8 @@ function resolver(d1, d2, nuevos) {
 async function leerTanda(item, t, i, n) {
   const cab = `Archivo: "${item.name}"` + (n > 1 ? ` — parte ${i + 1} de ${n} (las otras partes del mismo archivo se leen aparte; si estas páginas continúan un documento que empezó en una parte anterior, pon en descripcion "Continuación de …")` : "") + "."
     + (t.dudosa ? " Ojo: la imagen se ve borrosa o es de baja resolución; lee con cuidado." : "");
-  const lectura1 = await consultar(`${INSTRUCCIONES}\n\n${cab}`, t.imgs, t.texto);
+  const nivel = t.exigente ? {} : { modelTier: "default" };    // PDF digital con texto exacto: no necesita el modelo más caro
+  const lectura1 = await consultar(`${INSTRUCCIONES}\n\n${cab}`, t.imgs, t.texto, nivel);
   const prob1 = lectura1.map((d) => validar(d));
   const problemas = lectura1.flatMap((d, k) => prob1[k].concat(d.dudas).map((x) => `${ETIQ[d.tipo]}: ${x}`));
   problemas.push(...lectura1.flatMap((d) => faltantes(d).map((k) => `${ETIQ[d.tipo]}: falta ${k.replace(/_/g, " ")}`)));   // búsqueda enfocada en lo que falta
@@ -1218,7 +1293,7 @@ async function leerTanda(item, t, i, n) {
   // Segunda lectura independiente, enfocada en lo dudoso (con la página ampliada en cuadrantes si es una foto)
   paso(item, n > 1 ? `Verificando parte ${i + 1} de ${n}…` : "Verificando datos dudosos…");
   let lectura2;
-  try { lectura2 = await consultar(VERIFICAR(problemas, { documentos: lectura1 }) + `\n\n${cab}`, t.zoom || t.imgs, t.texto, { cache: false }); }
+  try { lectura2 = await consultar(VERIFICAR(problemas, { documentos: lectura1 }) + `\n\n${cab}`, t.zoom || t.imgs, t.texto, { cache: false }); }   // la verificación siempre con el más capaz
   catch (e) { if (esFatal(e)) throw e; }
   if (!lectura2?.length) return sinSegunda();
   for (const d of lectura2) {
@@ -1381,6 +1456,13 @@ function armarFicha() {
   if (D?.cp && /^\d{5}$/.test(D.cp.trim()) && estadoDeTexto(D.municipio_estado) && !cpNoCuadra(D.cp.trim(), D.municipio_estado))
     verificados.push(`El código postal ${D.cp.trim()} corresponde al estado del domicilio (${NOMBRE_EDO[estadoDeCp(D.cp.trim())]}).`);
   if (ine?.vigencia && ine.vigencia >= new Date().getFullYear()) verificados.push(`La INE está vigente (hasta ${ine.vigencia}).`);
+  if (ine?.fecha_nacimiento && sol?.fecha_nacimiento) {
+    if (ine.fecha_nacimiento !== sol.fecha_nacimiento) avisos.push(`La fecha de nacimiento de la solicitud (${sol.fecha_nacimiento}) no coincide con la de la INE (${ine.fecha_nacimiento}).`);
+    else verificados.push("La fecha de nacimiento de la solicitud coincide con la INE.");
+  }
+  if (ine?.curp && sol?.curp && ine.curp !== sol.curp) avisos.push(`La CURP de la solicitud (${sol.curp}) es distinta a la de la INE (${ine.curp}).`);
+  if (!ine?.curp && sol?.curp && curpValida(sol.curp) && sol.fecha_nacimiento && fechaDeCurp(sol.curp) === sol.fecha_nacimiento)
+    verificados.push("La CURP de la solicitud es válida (dígito verificador correcto) y coincide con la fecha de nacimiento.");
   if (ine?.cp && sol?.cp) {
     if (ine.cp.trim() !== sol.cp.trim()) avisos.push(`El CP de la solicitud (${sol.cp}) es distinto al de la INE (${ine.cp}); el cliente pudo cambiar de domicilio.`);
     else verificados.push("El código postal de la solicitud coincide con la INE.");
@@ -1402,7 +1484,7 @@ function armarFicha() {
   return {
     campos: {
       nombre: { v: nombre, src: nombreSrc },
-      fecha_nacimiento: { v: ine?.fecha_nacimiento || null, src: ine?.fecha_nacimiento ? "INE" : null },
+      fecha_nacimiento: { v: ine?.fecha_nacimiento || sol?.fecha_nacimiento || null, src: ine?.fecha_nacimiento ? "INE" : sol?.fecha_nacimiento ? "Solicitud" : null },
       direccion: { v: direccion, src: dirSrc },
       correo: { v: sol?.correo || null, src: sol?.correo ? "Solicitud" : null },
       celular: { v: sol?.telefono_celular || null, src: sol?.telefono_celular ? "Solicitud" : null },
@@ -1432,7 +1514,7 @@ function render() {
   // Archivos
   const pend = S.files.filter((f) => f.status === "pendiente").length;
   const corriendo = S.files.some((f) => f.status === "procesando");
-  $("procesar").disabled = !pend || corriendo || S.bloqueado;
+  $("procesar").disabled = !pend || corriendo || S.bloqueado || S.pausa;
   $("procesar").textContent = corriendo ? "Leyendo…" : pend ? `Leer ${pend} documento${pend > 1 ? "s" : ""}` : "Leer documentos";
   $("files-empty").hidden = S.files.length > 0;
   $("drop-t").textContent = S.files.length ? "Agregar más documentos" : "Arrastra aquí todos los documentos del cliente";
@@ -1549,19 +1631,25 @@ function bloquear(e) {
     session_expired: "Tu sesión de Claude expiró. Vuelve a iniciar sesión y recarga la página.",
     images_unavailable: "Esta vista no puede enviar imágenes a Claude. Abre la página en claude.ai desde un navegador o la app de escritorio." }[e?.code]
     || "Claude no está disponible para esta cuenta en esta página. Ábrela en claude.ai con tu sesión iniciada.";
-  $("banner").textContent = m; $("banner").hidden = false;
+  $("banner").className = "banner"; $("banner").textContent = m; $("banner").hidden = false;
 }
 let activos = 0;
 S.paralelo = 2;
 function correr() {
   if (!S.clave) { if (S.files.some((f) => f.status === "pendiente")) abrirConfig("Pega tu clave de API para empezar a leer."); render(); return; }
-  while (activos < S.paralelo && !S.bloqueado) {
+  while (activos < S.paralelo && !S.bloqueado && !S.pausa) {
     const f = S.files.find((x) => x.status === "pendiente"); if (!f) break;
     f.status = "procesando"; f.error = null; f.docs = null; activos++; render();
     procesar(f).then(() => { f.status = "listo"; f.paso = null; })
       .catch((e) => {
         f.paso = null;
         if (e?.code === "pdf_password") { f.status = "contrasena"; f.error = e.message; return; }
+        if (e?.code === "rate_limited") {          // límite de uso: no seguir gastando intentos con los demás archivos
+          f.status = "pendiente"; f.error = null; S.pausa = true;
+          $("banner").replaceChildren(el("span", {}, "Tu cuenta de API llegó a su límite por minuto o de gasto. Los archivos que faltan quedaron en espera; cuando quieras, toca "),
+            el("button", { className: "btn small", type: "button", onclick: () => { S.pausa = false; $("banner").hidden = true; correr(); } }, "Seguir leyendo"));
+          $("banner").className = "banner warn"; $("banner").hidden = false; return;
+        }
         f.status = "error"; f.error = mensajeError(e); f.sinReintento = !!e?.sinReintento;
         if (e?.code === "clave" || e?.code === "saldo") abrirConfig(e.message);
         if (esFatal(e)) { bloquear(e); S.files.forEach((x) => { if (x.status === "pendiente") x.status = "error", x.error = "No se procesó."; }); }

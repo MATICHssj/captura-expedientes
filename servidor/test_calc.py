@@ -147,3 +147,12 @@ def test_cp_contra_estado():
     s = DocExtraction(tipo="solicitud", solicitud=Solicitud(cp="44510", municipio_estado="Iztapalapa, CDMX", telefono_celular="044 55 1234 5678", correo="ANA,LOPEZ@GMAIL.CON"))
     p = validar(s)
     assert any("Jalisco" in x for x in p) and s.solicitud.telefono_celular == "5512345678" and s.solicitud.correo == "ana.lopez@gmail.com"
+
+
+def test_solicitud_rfc_curp_y_fecha():
+    s = DocExtraction(tipo="solicitud", solicitud=Solicitud(nombre_completo="ERIKA LESLIE LEDESMA MARTINEZ", rfc="leme921213je4", curp="LEME921213MDFRR01"))
+    p = validar(s)
+    assert s.solicitud.fecha_nacimiento == "1992-12-13" and s.solicitud.rfc == "LEME921213JE4"
+    assert any("CURP" in x and "formato" in x for x in p)          # a la CURP le falta un carácter
+    s = DocExtraction(tipo="solicitud", solicitud=Solicitud(rfc="LEME921213JE4", fecha_nacimiento="1992-12-31"))
+    assert any("RFC" in x and "1992-12-13" in x for x in validar(s))

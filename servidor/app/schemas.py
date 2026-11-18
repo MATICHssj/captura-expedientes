@@ -44,6 +44,9 @@ class Solicitud(BaseModel):
     colonia: Optional[str] = None
     cp: Optional[str] = None
     municipio_estado: Optional[str] = None
+    fecha_nacimiento: Optional[str] = Field(None, description="YYYY-MM-DD, si la solicitud la trae")
+    curp: Optional[str] = Field(None, description="Tal cual viene en la solicitud")
+    rfc: Optional[str] = Field(None, description="Tal cual viene en la solicitud")
 
 
 class Cotizacion(BaseModel):

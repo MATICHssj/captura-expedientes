@@ -40,6 +40,9 @@ Por tipo:
   esos números con cuidado; si sigue sin cuadrar, deja lo que dice el documento y anótalo en `dudas`.
 - Estado de cuenta: total_depositos_abonos = total de 'Depósitos'/'Abonos' del RESUMEN del periodo; copia el
   total impreso, no sumes tú. suma_abonos_movimientos solo si ves toda la tabla.
+- Solicitud: nombre, correo, celular, domicilio y, si vienen, fecha de nacimiento, CURP y RFC (cópialos tal cual).
+  Si la fecha viene en casillas separadas (día, mes, año), júntala. "Lugar de nacimiento" NO es el domicilio. Si no hay
+  correo personal pero sí del trabajo, usa ese y anótalo en `dudas`.
 - Fechas YYYY-MM-DD. Montos como número sin $ ni comas. Celular a 10 dígitos."""
 
 VERIFICAR = """Revisa de nuevo este documento con mucho cuidado, carácter por carácter.

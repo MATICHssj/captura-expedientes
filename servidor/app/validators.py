@@ -157,46 +157,75 @@ def corregir_correo(correo: str) -> tuple[str, str | None]:
     return c, None
 
 
+RFC_RE = re.compile(r"^[A-ZÑ&]{4}\d{6}([A-Z0-9]{3})?$")
+
+
+def fecha_desde_rfc(rfc: str) -> str | None:
+    if not re.match(r"^[A-ZÑ&]{4}\d{6}", rfc or ""):
+        return None
+    yy = int(rfc[4:6])
+    return f"{19 if yy > date.today().year % 100 else 20}{rfc[4:6]}-{rfc[6:8]}-{rfc[8:10]}"
+
+
+def revisar_identidad(i, p: list[str]) -> None:
+    """CURP (dígito verificador, corrección letra/número), fecha de nacimiento y RFC de la INE o la solicitud."""
+    if i.curp:
+        i.curp = re.sub(r"[\s-]", "", i.curp).upper()
+        if len(i.curp) == 18 and not curp_valida(i.curp):
+            r = reparar_curp(i.curp)
+            if r != i.curp and curp_valida(r):
+                p.append(f"CURP: se leyó '{i.curp}' y la corregí a {r} (confusión entre letra y número; así sí pasa el dígito verificador)")
+                i.curp = r
+        if not CURP_RE.match(i.curp):
+            p.append(f"CURP '{i.curp}' no tiene formato válido")
+        else:
+            if i.curp[11:13] not in CURP_EDOS:
+                p.append(f"CURP {i.curp}: '{i.curp[11:13]}' no es una clave de estado válida; algún carácter está mal leído")
+            elif int(i.curp[17]) != digito_curp(i.curp):
+                p.append(f"la CURP {i.curp} no pasa el dígito verificador (con esos 17 caracteres terminaría en {digito_curp(i.curp)}): algún carácter está mal leído")
+            fc = fecha_desde_curp(i.curp)
+            if i.fecha_nacimiento and fc != i.fecha_nacimiento:
+                p.append(f"fecha de nacimiento {i.fecha_nacimiento} no coincide con la CURP ({fc})")
+            elif not i.fecha_nacimiento:
+                i.fecha_nacimiento = fc
+            if i.nombre_completo and not curp_vs_nombre(i.curp, i.nombre_completo):
+                p.append(f"la CURP {i.curp} no corresponde a las iniciales del nombre '{i.nombre_completo}'")
+    if i.fecha_nacimiento and not _fecha_ok(i.fecha_nacimiento):
+        p.append(f"fecha de nacimiento '{i.fecha_nacimiento}' no es válida")
+    elif i.fecha_nacimiento:
+        y, m, dd = map(int, i.fecha_nacimiento.split("-"))
+        hoy = date.today()
+        edad = hoy.year - y - ((hoy.month, hoy.day) < (m, dd))
+        if edad < 18 or edad > 85:
+            p.append(f"la edad calculada ({edad} años) es poco común; revisa la fecha de nacimiento")
+    rfc = getattr(i, "rfc", None)
+    if rfc:
+        i.rfc = rfc = re.sub(r"[\s-]", "", rfc).upper()
+        if not RFC_RE.match(rfc):
+            p.append(f"RFC '{rfc}' no tiene formato válido (4 letras, 6 números de la fecha y 3 de homoclave)")
+        else:
+            fr = fecha_desde_rfc(rfc)
+            if i.fecha_nacimiento and _fecha_ok(i.fecha_nacimiento) and fr != i.fecha_nacimiento:
+                p.append(f"el RFC {rfc} dice nacimiento {fr}, pero la fecha de nacimiento es {i.fecha_nacimiento}")
+            elif not i.fecha_nacimiento and _fecha_ok(fr):
+                i.fecha_nacimiento = fr
+            if i.curp and len(i.curp) >= 10 and i.curp[:10] != rfc[:10]:
+                p.append(f"el RFC {rfc} y la CURP {i.curp} no coinciden en los primeros 10 caracteres")
+
+
 def validar(d: DocExtraction) -> list[str]:
     """Revisa y normaliza en el lugar. Regresa lista de problemas encontrados."""
     p = []
     if d.ine:
         i = d.ine
-        if i.curp:
-            i.curp = re.sub(r"[\s-]", "", i.curp).upper()
-            if len(i.curp) == 18 and not curp_valida(i.curp):
-                r = reparar_curp(i.curp)
-                if r != i.curp and curp_valida(r):
-                    p.append(f"CURP: se leyó '{i.curp}' y la corregí a {r} (confusión entre letra y número; así sí pasa el dígito verificador)")
-                    i.curp = r
-            if not CURP_RE.match(i.curp):
-                p.append(f"CURP '{i.curp}' no tiene formato válido")
-            else:
-                if i.curp[11:13] not in CURP_EDOS:
-                    p.append(f"CURP {i.curp}: '{i.curp[11:13]}' no es una clave de estado válida; algún carácter está mal leído")
-                elif int(i.curp[17]) != digito_curp(i.curp):
-                    p.append(f"la CURP {i.curp} no pasa el dígito verificador (con esos 17 caracteres terminaría en {digito_curp(i.curp)}): algún carácter está mal leído")
-                fc = fecha_desde_curp(i.curp)
-                if i.fecha_nacimiento and fc != i.fecha_nacimiento:
-                    p.append(f"fecha de nacimiento {i.fecha_nacimiento} no coincide con la CURP ({fc})")
-                elif not i.fecha_nacimiento:
-                    i.fecha_nacimiento = fc
-                if i.nombre_completo and not curp_vs_nombre(i.curp, i.nombre_completo):
-                    p.append(f"la CURP {i.curp} no corresponde a las iniciales del nombre '{i.nombre_completo}'")
-        if i.fecha_nacimiento and not _fecha_ok(i.fecha_nacimiento):
-            p.append(f"fecha de nacimiento '{i.fecha_nacimiento}' no es válida")
-        elif i.fecha_nacimiento:
-            y, m, dd = map(int, i.fecha_nacimiento.split("-"))
-            hoy = date.today()
-            edad = hoy.year - y - ((hoy.month, hoy.day) < (m, dd))
-            if edad < 18 or edad > 85:
-                p.append(f"la edad calculada ({edad} años) es poco común; revisa la fecha de nacimiento")
+        revisar_identidad(i, p)
         if i.vigencia and i.vigencia < date.today().year:
             p.append(f"la INE venció en {i.vigencia}")
         if i.cp and (x := cp_no_cuadra(i.cp.strip(), i.municipio_estado)):
             p.append(x)
     if d.solicitud:
         s = d.solicitud
+        revisar_identidad(s, p)
         if s.correo:
             s.correo, aviso = corregir_correo(s.correo)
             if aviso:
